@@ -2,8 +2,8 @@
 
 - 정리 기준일: 2026-10-20
 - 저장소: [newskool4d-sketch/minwon-answer-web](https://github.com/newskool4d-sketch/minwon-answer-web) — 공개(2026-10-20 확인). 공개 유지 여부는 3장 5번 과제에서 확정
-- 현재 릴리스: [v0.4.0](https://github.com/newskool4d-sketch/minwon-answer-web/releases/tag/v0.4.0)
-- 웹 화면(Vercel `minwon-answer-web.vercel.app`): 프로젝트 삭제(2026-10-20). 웹 연결 기능은 v0.4.1에서 제거(릴리스 준비)
+- 현재 릴리스: [v0.4.1](https://github.com/newskool4d-sketch/minwon-answer-web/releases/tag/v0.4.1)
+- 웹 화면(Vercel `minwon-answer-web.vercel.app`): 프로젝트 삭제(2026-10-20). 웹 연결 기능은 v0.4.1에서 제거
 
 ## 1. 완료한 작업
 
@@ -25,14 +25,15 @@
 | 검증 | 자동 테스트 76개 통과, 구문 검사 통과. 빌드 시 EXE self-test 통과. GitHub 릴리스에서 내려받은 EXE의 SHA-256이 `.sha256`·자산 digest와 일치 |
 | 배포 파일 | `minwon-answer-0.4.0-win-x64.exe` 34,234,368 bytes, SHA-256 `cabb7fb5f3ca3be914488abc39c530d012f07db47f7bf6244b5b471c013ca5b8`. Authenticode 서명 없음(SmartScreen 경고 가능) |
 
-### v0.4.1 (릴리스 준비, 2026-10-20)
+### v0.4.1 (2026-10-20)
 
 | 구분 | 내용 |
 |---|---|
 | 서버 | 웹 연결 API 4개(`/api/pair*`)·원격 세션·CORS 제거. 로컬 출처(`http://127.0.0.1:<port>`·`http://localhost:<port>`)가 아닌 Origin의 요청은 CORS 헤더 없이 403 `CROSS_ORIGIN`. Host 검사·사이트 간 요청 차단·CSRF·단계별 동의는 유지 |
 | 화면 | 웹 연결 모드·'웹 연결 관리'·PC 연결 코드 대화상자 제거. 같은 출처 호출만 사용 |
 | 파일 | `vercel.json`·`scripts/build-web.mjs`·`tests/bridge.test.mjs` 삭제, `npm run build` 제거. `docs/DEPLOYMENT.md`는 '로컬 실행과 보안 경계'로 재작성, README·`docs/WINDOWS-EXE.md`·`docs/api-contract.md` 갱신 |
-| 검증 | 자동 테스트 72개 통과(웹 연결 테스트 10개 삭제, 로컬 경계·세션 만료·키 분리 테스트 6개 추가), 구문 검사 통과. 로컬 화면에서 콘솔 오류 0건, 가상 예시 초안·검토 정상 |
+| 검증 | 자동 테스트 72개 통과(웹 연결 테스트 10개 삭제, 로컬 경계·세션 만료·키 분리 테스트 6개 추가), 구문 검사 통과. 로컬 화면에서 콘솔 오류 0건, 가상 예시 초안·검토 정상. 빌드 시 EXE self-test 통과. GitHub 릴리스에서 내려받은 EXE의 SHA-256이 `.sha256`·자산 digest와 일치 |
+| 배포 파일 | `minwon-answer-0.4.1-win-x64.exe` 34,228,224 bytes, SHA-256 `d03113e57afd856ff1482a3bf98f102589261bb331199983918317fbb90ec1aa`. Authenticode 서명 없음(SmartScreen 경고 가능) |
 
 ## 2. 현재 동작 방식
 
