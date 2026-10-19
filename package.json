@@ -1,6 +1,6 @@
 {
   "name": "minwon-answer-web",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "description": "로컬 AI 로그인 연결을 지원하는 민원답변 웹 앱",

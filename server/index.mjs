@@ -50,7 +50,7 @@ export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000}={
       expire();
       const localPageNavigation=req.method==='GET'&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&!url.pathname.startsWith('/api/');
       if(req.headers['sec-fetch-site']==='cross-site'&&!localPageNavigation)fail('CROSS_SITE','다른 사이트의 요청은 허용하지 않습니다.',403);
-      if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:'0.4.0',storage:'memory-only',deployment:'loopback-only'});
+      if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:'0.4.1',storage:'memory-only',deployment:'loopback-only'});
       if(url.pathname.startsWith('/api/')){
         const s=session(req,res);
         if(req.method==='GET'&&url.pathname==='/api/session'){decorateGemini(s);return json(res,200,{state:exportState(s.state),csrfToken:s.csrf});}
