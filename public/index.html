@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>민원답변 도우미 · minwon-answer</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">본문으로 이동</a>
+  <header class="site-header">
+    <a href="/" class="brand" aria-label="민원답변 도우미 홈">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14v13H9l-4 3V4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 9h6M9 12h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>
+      <span>민원답변 도우미<small>minwon-answer</small></span>
+    </a>
+    <div class="header-actions"><span id="connection-indicator" class="local-indicator">연결 준비 중</span><button id="connection-open" type="button" class="button secondary" hidden>내 PC 연결</button><button id="connection-disconnect" type="button" class="button subtle" hidden>연결 해제</button><button id="web-manager-open" type="button" class="button subtle" hidden>웹 연결 관리</button><button id="settings-open" type="button" class="button subtle" disabled>AI 연결 설정 <span aria-hidden="true">↗</span></button></div>
+  </header>
+
+  <main id="workspace" tabindex="-1">
+    <section class="page-intro" aria-labelledby="page-title">
+      <div><p class="eyebrow">교육행정 민원 작성 공간</p><h1 id="page-title">충실하게 답하고, 한 번 더 검토하세요.</h1><p class="intro-copy">민원과 확인된 사실을 정리하면, 초안부터 검토와 재작성까지 이어갈 수 있습니다.</p></div>
+      <button id="load-example" type="button" class="button secondary" disabled>가상 예시로 시작 <span aria-hidden="true">→</span></button>
+    </section>
+
+    <div class="workspace-info"><span class="badge demo" id="mode-badge">데모 · 외부 전송 없음</span><span id="session-note">작성 내용은 현재 세션의 메모리에서만 보관됩니다. 서버를 종료하면 사라집니다.</span></div>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <div id="error-notice" class="notice error" role="alert" hidden></div>
+    <div id="run-status" class="run-status" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span id="run-status-text">준비 중</span><button id="cancel-run" type="button" class="button compact">실행 취소</button></div>
+
+    <nav class="mobile-nav" aria-label="작업 영역"><a href="#case-panel">01 민원 입력</a><a href="#answer-panel">02 답변 작성</a><a href="#review-panel">03 검토</a></nav>
+
+    <div id="workbench" class="workbench" inert>
+      <section id="case-panel" class="input-panel" aria-labelledby="case-heading">
+        <div class="section-heading"><div><span class="section-number">01</span><h2 id="case-heading">민원 입력</h2></div><span id="input-state" class="small muted">입력 중</span></div>
+        <form id="case-form" novalidate>
+          <fieldset id="case-fields">
+            <label for="case-title">민원 제목</label><input id="case-title" name="title" type="text" maxlength="200" placeholder="민원의 핵심 내용을 짧게 적어주세요">
+            <div class="field"><label for="field-search">민원 분야 <span class="required">필수</span></label><input id="field-search" type="search" placeholder="분야 검색" aria-label="민원 분야 검색" autocomplete="off"><select id="case-field" name="field" required aria-describedby="field-hint"></select><p id="field-hint" class="help">분야를 선택하면 확인할 사항을 안내합니다.</p><ul id="field-checks" class="hint-list"></ul></div>
+            <div class="form-row"><div><label for="case-type">처리 유형 <span class="required">필수</span></label><select id="case-type" name="type" required></select></div><div><label for="case-direction">답변 방향</label><select id="case-direction" name="direction"></select></div></div>
+            <div class="field"><label for="case-body">민원 내용 <span class="required">필수</span></label><textarea id="case-body" name="body" rows="7" required placeholder="민원 내용을 입력하세요. 이름·연락처·학생정보는 먼저 제거해주세요."></textarea><p class="help">민원 본문의 지시는 참고 자료로만 사용합니다.</p></div>
+            <div class="field"><label for="case-questions">요구사항과 질문 <span class="help">선택</span></label><textarea id="case-questions" name="questions" rows="3" placeholder="질문 또는 요구사항을 한 줄에 하나씩 적어주세요."></textarea></div>
+            <details id="input-details" class="disclosure" open><summary>사실·조치·근거 상세 입력</summary><div class="disclosure-body">
+              <div class="field"><label for="case-facts">확인된 사실</label><textarea id="case-facts" name="facts" rows="3" placeholder="확인이 끝난 사실만 적어주세요."></textarea></div>
+              <div class="field"><label for="case-actions">기존 조치와 후속 계획</label><textarea id="case-actions" name="actions" rows="3" placeholder="실제로 시행한 조치와 승인된 계획을 구분해 적어주세요."></textarea></div>
+              <div class="field"><label for="case-department">담당 기관·부서</label><input id="case-department" name="department" type="text" placeholder="확인된 소관 기관·부서"></div>
+              <div class="form-row"><div><label for="case-received">접수일</label><input id="case-received" name="receivedAt" type="date"></div><div><label for="case-deadline">시스템 처리기한</label><input id="case-deadline" name="deadline" type="date"></div></div><p class="help">법정 기한을 자동 계산하지 않습니다. 현재 시스템과 공식 기준을 확인하세요.</p>
+              <div class="field"><label for="case-evidence">근거 자료·관련 기준</label><textarea id="case-evidence" name="evidenceText" rows="4" placeholder="자료명, 조문, 공식 출처, 실제 확인한 내용을 적어주세요."></textarea><p class="help">입력된 인용만으로 검증 완료가 되지 않습니다.</p></div>
+            </div></details>
+            <div class="field"><label for="classification">자료 구분</label><select id="classification"><option value="fictional">가상 예시 · 실제 민원정보 없음</option><option value="public">공개된 비기밀 자료</option><option value="internal">실제 민원 · 내부 자료</option></select><p id="classification-hint" class="help">가상 자료로 먼저 작성 흐름을 확인해보세요.</p></div>
+          </fieldset>
+          <div class="input-footer"><button id="save-case" type="submit" class="button secondary">입력 저장</button><span id="save-hint" class="help">현재 세션에 저장</span></div>
+        </form>
+      </section>
+
+      <section id="answer-panel" class="answer-panel" aria-labelledby="answer-heading">
+        <div class="section-heading"><div><span class="section-number">02</span><h2 id="answer-heading">답변 작성</h2></div><span id="workflow-state" class="badge">입력 중</span></div>
+        <ol class="workflow" aria-label="작성 진행 단계"><li id="step-draft" aria-current="step"><span>1</span>초안 생성</li><li id="step-review"><span>2</span>검토</li><li id="step-rewrite"><span>3</span>재작성</li><li id="step-confirm"><span>4</span>담당자 확정</li></ol>
+        <div class="action-bar"><button id="draft-button" type="button" class="button primary">초안 생성 <span aria-hidden="true">→</span></button><button id="review-button" type="button" class="button secondary" disabled>현재 답변 검토</button><button id="rewrite-button" type="button" class="button secondary" disabled>선택 의견 반영 재작성</button></div>
+        <div id="stage-models" class="stage-models" aria-label="단계별 AI 설정"></div>
+        <div id="empty-answer" class="empty-answer"><span class="empty-symbol" aria-hidden="true">文</span><h3>첫 답변을 준비해볼까요?</h3><p>왼쪽에 민원 분야와 내용을 입력한 뒤<br>‘초안 생성’을 눌러주세요.</p><p class="small muted">또는 상단의 가상 예시로 부담 없이 시작하세요.</p></div>
+        <div id="answer-content" hidden>
+          <div class="editor-toolbar"><div class="version-select"><label for="version-select">버전</label><select id="version-select" aria-label="답변 버전 선택"></select></div><div class="reading-tools"><button id="font-smaller" type="button" class="button icon-button" aria-label="답변 글자 작게">가−</button><button id="font-larger" type="button" class="button icon-button" aria-label="답변 글자 크게">가+</button><button id="focus-toggle" type="button" class="button compact" aria-pressed="false">집중 읽기</button></div></div>
+          <div class="answer-meta"><span id="answer-source" class="badge demo"></span><span id="answer-time" class="small muted"></span></div>
+          <label class="sr-only" for="answer-editor">민원 답변 본문</label><textarea id="answer-editor" class="answer-editor" rows="17" spellcheck="false" aria-describedby="answer-edit-hint"></textarea>
+          <div class="editor-footer"><p id="answer-edit-hint" class="help">직접 수정한 내용은 새 버전으로 저장됩니다.</p><span id="char-count" class="small muted">0자</span></div>
+          <div class="editor-actions"><button id="save-answer" type="button" class="button secondary" disabled>수동 수정 저장</button><button id="restore-version" type="button" class="button secondary" hidden>이 버전을 새 버전으로 복원</button><button id="return-current" type="button" class="button subtle" hidden>현재 버전으로 돌아가기</button></div>
+          <details id="diff-panel" class="disclosure"><summary>이전 버전과 수정 내역 비교</summary><div class="disclosure-body"><p class="help diff-key">− 삭제된 문단 · + 추가된 문단 · 같은 문단은 그대로 표시</p><div id="answer-diff" class="answer-diff"></div></div></details>
+          <details id="review-panel" class="disclosure review-panel" open><summary><span>03 검토 의견</span><span id="review-count" class="small muted">검토 필요</span></summary><div class="disclosure-body"><p id="review-summary" class="review-summary">현재 답변을 검토하면 확인사항을 보여줍니다.</p><p id="review-provenance" class="help"></p><div id="review-findings"></div><div id="question-mapping"></div></div></details>
+          <div class="rewrite-section"><label for="rewrite-instructions">재작성 추가 지시</label><textarea id="rewrite-instructions" rows="2" placeholder="예: 질문별로 답변을 나누고, 확인이 필요한 부분은 표시해주세요."></textarea><div class="quick-prompts"><button type="button" class="chip" data-instruction="더 간결하게 작성해주세요.">더 간결하게</button><button type="button" class="chip" data-instruction="민원인의 질문별로 답변을 구분해주세요.">질문별로 구분</button><button type="button" class="chip" data-instruction="공감 표현을 조정하되 사실과 결론은 바꾸지 마세요.">공감 표현 조정</button></div></div>
+          <details id="verification-panel" class="disclosure"><summary>근거 확인 및 담당자 점검 <span id="gate-count" class="small muted"></span></summary><div class="disclosure-body"><div id="unresolved-items"></div><div id="evidence-list"></div>
+            <details class="nested-disclosure"><summary>공식 근거 수기 확인 추가</summary><form id="evidence-form"><div class="field"><label for="evidence-title">법령·자료명</label><input id="evidence-title" name="title" required></div><div class="field"><label for="evidence-url">공식 원문 URL</label><input id="evidence-url" name="url" type="url" placeholder="https://" required></div><div class="form-row"><div><label for="evidence-effective">시행일·자료 기준일</label><input id="evidence-effective" name="effectiveDate" type="date" required></div><div><label for="evidence-checked">확인일</label><input id="evidence-checked" name="checkedAt" type="date" required></div></div><div class="field"><label for="evidence-by">확인 주체·방법</label><input id="evidence-by" name="checkedBy" placeholder="담당자 · 공식 원문 직접 확인" required></div><div class="field"><label for="evidence-quote">실제로 확인한 원문·발췌</label><textarea id="evidence-quote" name="quote" rows="3" required></textarea></div><p class="help">근거를 추가하면 현재 검토와 확정이 만료되어 재검토가 필요합니다.</p><button type="submit" class="button secondary">수기 확인 근거 추가</button></form></details>
+            <fieldset id="human-checks" class="human-checks"><legend>담당자 확인</legend><label><input type="checkbox" name="facts">사실·수치·질문별 답변을 확인했습니다.</label><label><input type="checkbox" name="privacy">개인정보·제3자 정보·내부 메모 혼입을 확인했습니다.</label><label><input type="checkbox" name="jurisdiction">소관과 필요한 행정 절차를 확인했습니다.</label><label><input type="checkbox" name="deadline">기한과 후속 안내를 확인했습니다. 해당 없으면 그 사유를 본문에서 확인했습니다.</label><label><input type="checkbox" name="sources">인용 근거를 확인했습니다. 인용이 필요 없는 답변인지도 확인했습니다.</label></fieldset>
+            <button id="save-checks" type="button" class="button secondary">담당자 점검 저장</button>
+          </div></details>
+          <section class="confirm-section" aria-labelledby="confirm-heading"><h3 id="confirm-heading">담당자 확정</h3><p class="help">현재 버전을 직접 확인한 뒤 확정하세요. 기관의 공식 결재·발송은 별도로 진행해야 합니다.</p><ul id="gate-reasons" class="gate-reasons"></ul><button id="confirm-button" type="button" class="button primary" disabled>이 답변을 담당자 확정</button></section>
+          <div class="export-section"><div class="export-row"><button id="copy-draft" type="button" class="button secondary">초안 복사</button><button id="copy-final" type="button" class="button secondary" disabled>확정 답변 복사</button><label class="sr-only" for="export-format">다운로드 형식</label><select id="export-format"><option value="txt">텍스트 (.txt)</option><option value="md">Markdown (.md)</option></select><button id="download-answer" type="button" class="button subtle">다운로드 ↓</button><button id="print-answer" type="button" class="button subtle">인쇄</button></div><p class="help">검토 전 초안도 내보낼 수 있습니다. 내부 검토표와 추가 지시는 포함하지 않습니다.</p></div>
+        </div>
+      </section>
+    </div>
+    <footer class="page-footer"><p>AI는 작성과 검토를 돕습니다. 사실·근거·최종 답변은 담당자가 확인합니다. <a href="https://github.com/newskool4d-sketch/minwon-answer-web" target="_blank" rel="noopener noreferrer">GitHub</a></p><button id="reset-open" type="button" class="button subtle small" disabled>현재 세션 비우기</button></footer>
+  </main>
+
+  <dialog id="connection-dialog" aria-labelledby="connection-title"><div class="dialog-header"><div><p class="eyebrow">웹 화면 · 내 PC 연결</p><h2 id="connection-title">내 PC의 작성 공간에 연결</h2></div><button type="button" class="button close-button" data-close="connection-dialog" aria-label="내 PC 연결 닫기">×</button></div>
+    <p class="connection-description">공개 웹에서는 화면만 제공합니다. 민원·답변·AI 인증은 실행 중인 내 PC의 로컬 프로그램에서 관리하며, 연결은 직접 허용할 때만 켜집니다.</p>
+    <ol class="connection-steps"><li>같은 PC에서 로컬 프로그램을 실행하세요. <a href="http://127.0.0.1:8793/#web-connection" target="_blank" rel="noopener noreferrer">로컬 웹 연결 관리 열기 ↗</a></li><li>아래 웹 주소를 로컬의 ‘웹 연결 관리’에 붙여 넣고 접근을 허용해 코드를 발급하세요.</li><li>5분 이내에 일회용 코드를 입력해 연결하세요.</li></ol>
+    <label for="web-origin">허용할 현재 웹 주소</label><div class="connection-input-row"><input id="web-origin" type="text" readonly autocomplete="off"><button id="copy-web-origin" type="button" class="button secondary">주소 복사</button></div>
+    <form id="pair-form"><div class="field"><label for="pair-code">일회용 연결 코드</label><input id="pair-code" type="password" autocomplete="off" spellcheck="false" placeholder="내 PC에서 발급한 코드" required maxlength="256"><p class="help">코드·연결 토큰은 이 탭의 메모리에서만 사용합니다. 새로고침하면 다시 연결해야 합니다.</p></div><p id="connection-error" class="connection-message error" role="alert" hidden></p><p id="connection-message" class="help" role="status" aria-live="polite"></p><div class="button-row"><button id="pair-connect" type="submit" class="button primary">코드로 내 PC 연결</button><button id="connection-retry" type="button" class="button secondary" hidden>연결 상태 다시 불러오기</button></div></form>
+    <div id="retained-work" class="retained-work" hidden><p class="help">기존 화면의 작업은 유지됩니다. 새 연결의 세션을 불러오기 전에 필요한 내용을 내려받으세요.</p><button id="download-retained-work" type="button" class="button secondary">현재 입력·답변 내려받기</button></div>
+    <p class="help">브라우저가 묻는 로컬 기기 접근을 허용해야 합니다. 연결이 안 되면 로컬 프로그램 실행, 8793 포트, 이 웹 주소의 접근 허용을 확인하세요.</p><p class="help"><a href="https://github.com/newskool4d-sketch/minwon-answer-web" target="_blank" rel="noopener noreferrer">설치·실행 안내 GitHub ↗</a></p>
+  </dialog>
+
+  <dialog id="web-manager-dialog" aria-labelledby="web-manager-title"><div class="dialog-header"><div><p class="eyebrow">내 PC에서만 관리</p><h2 id="web-manager-title">웹 연결 관리</h2></div><button type="button" class="button close-button" data-close="web-manager-dialog" aria-label="웹 연결 관리 닫기">×</button></div>
+    <p class="connection-description">기본 상태는 웹 접근 꺼짐입니다. 직접 지정한 HTTPS 웹 주소에만 일회용 연결을 허용합니다.</p>
+    <form id="pair-code-form"><label for="allowed-web-origin">허용할 HTTPS 웹 주소</label><input id="allowed-web-origin" type="url" placeholder="https://서비스주소.vercel.app" autocomplete="off" spellcheck="false" required><p class="help">웹 화면에서 ‘주소 복사’로 복사한 주소를 붙여 넣으세요. 경로·쿼리 없이 정확한 웹 주소를 입력합니다.</p><label class="consent-checkbox"><input id="pair-code-approved" type="checkbox">이 웹 주소에서 내 PC 세션의 민원·답변을 열람하고 AI 요청을 실행하도록 허용합니다. AI 외부 전송은 실행 단계마다 별도로 확인합니다.</label><div class="button-row"><button id="issue-pair-code" type="submit" class="button primary" disabled>허용하고 일회용 코드 발급</button></div></form>
+    <div id="issued-code-section" class="issued-code-section" hidden><label for="issued-pair-code">발급된 일회용 코드</label><div class="connection-input-row"><input id="issued-pair-code" type="password" readonly autocomplete="off" spellcheck="false"><button id="copy-pair-code" type="button" class="button secondary">코드 복사</button></div><p id="issued-code-details" class="help"></p></div>
+    <p id="web-manager-message" class="connection-message" role="status" aria-live="polite" hidden></p><div class="connection-revoke"><button id="revoke-web-connections" type="button" class="button danger">모든 웹 연결·코드 해제</button><p class="help">발급된 코드와 허용한 웹 세션을 해제합니다. 로컬 화면의 작성 내용은 유지됩니다.</p></div>
+  </dialog>
+
+  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-header"><div><p class="eyebrow">내 계정으로 연결</p><h2 id="settings-title">AI 연결 설정</h2></div><button type="button" class="button close-button" data-close="settings-dialog" aria-label="AI 연결 설정 닫기">×</button></div><p class="help">공식 프로그램의 인증 상태와 실제 생성 성공 여부는 구분됩니다. 선택한 제공사로만 요청합니다.</p><div id="provider-connections" class="provider-connections"></div><button id="refresh-providers" type="button" class="button secondary">연결 상태 다시 확인</button><p id="login-message" class="help" role="status"></p><a id="login-link" class="external-link" target="_blank" rel="noreferrer noopener" hidden>공식 로그인 창 열기 ↗</a>
+    <form id="gemini-form" class="gemini-form"><h3>Google Gemini API</h3><p class="help">키는 현재 서버 세션의 메모리에만 보관합니다. 키 연결은 모델 목록 조회를 요청합니다.</p><label for="gemini-key">Gemini API Key</label><input id="gemini-key" type="password" autocomplete="off" spellcheck="false" placeholder="발급한 API Key 입력"><div class="button-row"><button id="connect-gemini" type="submit" class="button secondary">API 연결 확인</button><button id="disconnect-gemini" type="button" class="button subtle">연결 해제</button></div><p id="gemini-status" class="help"></p><p class="help">과금 분류가 미확인인 MVP에서는 가상 사례·공개된 비기밀 자료만 사용할 수 있습니다.</p></form>
+    <form id="model-form"><h3>단계별 제공사·모델</h3><div id="model-selections"></div><div class="dialog-footer"><button type="button" class="button subtle" data-close="settings-dialog">닫기</button><button type="submit" class="button primary">설정 저장</button></div></form>
+  </dialog>
+
+  <dialog id="consent-dialog" aria-labelledby="consent-title"><div class="dialog-header"><div><p class="eyebrow">외부 전송 전 확인</p><h2 id="consent-title">전송할 내용을 확인하세요</h2></div><button type="button" class="button close-button" data-close="consent-dialog" aria-label="전송 확인 취소">×</button></div><p id="consent-provider"></p><p class="help">아래 내용은 서버에서 마스킹한 전송 미리보기입니다. 자동 마스킹은 모든 개인정보를 찾지 못할 수 있습니다.</p><ul id="consent-warnings" class="warning-list"></ul><label for="consent-payload">실제 전송할 지침과 자료</label><textarea id="consent-payload" rows="13" readonly></textarea><label class="consent-checkbox"><input id="consent-approved" type="checkbox">이 단계의 전송 내용과 제공사를 확인했으며, 외부 AI 전송 및 발생할 수 있는 사용량·비용에 동의합니다.</label><p class="help">동의는 이 실행에 한 번만 적용됩니다. 새 요청에는 다시 확인합니다.</p><div class="dialog-footer"><button type="button" class="button secondary" data-close="consent-dialog">취소</button><button id="consent-run" type="button" class="button primary" disabled>동의하고 실행</button></div></dialog>
+  <dialog id="reset-dialog" aria-labelledby="reset-title"><div class="dialog-header"><h2 id="reset-title">현재 세션을 비울까요?</h2><button type="button" class="button close-button" data-close="reset-dialog" aria-label="초기화 취소">×</button></div><p>입력·답변 버전·검토·Gemini 키가 모두 사라집니다. 필요한 답변은 먼저 내려받아 보관하세요.</p><div class="dialog-footer"><button type="button" class="button secondary" data-close="reset-dialog">취소</button><button id="reset-session" type="button" class="button danger">현재 세션 비우기</button></div></dialog>
+  <section id="print-document" aria-label="인쇄할 답변" hidden><p id="print-status"></p><h1 id="print-title"></h1><div id="print-body"></div></section>
+</body>
+</html>
