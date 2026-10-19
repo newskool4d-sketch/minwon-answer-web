@@ -139,7 +139,9 @@ export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000,pa
           }finally{s.state.running=null;s.abort=null;}
         }else if(route==='/api/edit'){
           if(data.expectedRevision!==s.state.revision)fail('STALE_EDIT','다른 작업이 먼저 반영되었습니다. 최신 답변을 확인해 주세요.',409);
-          if(!current(s.state))fail('DRAFT_REQUIRED','초안을 먼저 생성해 주세요.');appendVersion(s.state,{answer:data.answer,summary:'담당자가 수동 편집한 새 버전입니다.',questions:current(s.state).questions,unresolved:[],evidence:[]},'manual',current(s.state).id);s.previews.clear();
+          if(!current(s.state))fail('DRAFT_REQUIRED','초안을 먼저 생성해 주세요.');
+          if(data.resolvedUnresolved!==undefined&&typeof data.resolvedUnresolved!=='boolean')fail('INVALID_INPUT','미해소 확인사항 해결 여부 형식을 확인해 주세요.');
+          const base=current(s.state);const resolved=data.resolvedUnresolved===true;appendVersion(s.state,{answer:data.answer,summary:resolved&&base.unresolved.length?'담당자가 수동 편집한 새 버전입니다. 미해소 확인사항 해결을 담당자가 확인했습니다.':'담당자가 수동 편집한 새 버전입니다.',questions:base.questions,unresolved:resolved?[]:clone(base.unresolved),evidence:[]},'manual',base.id);s.previews.clear();
         }else if(route==='/api/restore'){
           const version=s.state.versions.find(v=>v.id===data.versionId);if(!version)fail('VERSION_NOT_FOUND','복원할 버전을 찾을 수 없습니다.',404);
           const restored=appendVersion(s.state,{answer:version.answer,summary:`v${version.number} 본문에서 복원한 새 버전입니다. 재검토가 필요합니다.`,questions:version.questions,unresolved:version.unresolved,evidence:[]},'restored',version.id);restored.evidence=clone(version.evidence);s.previews.clear();

@@ -20,6 +20,7 @@ let answerDirty = false;
 let viewId = null;
 let selectedFindings = new Set();
 let renderedReviewId = null;
+let renderedEditVersionId = null;
 let pendingPreview = null;
 let pendingArguments = null;
 let answerFont = 17;
@@ -90,7 +91,7 @@ function setBusy(label = '') {
   $('run-status-text').textContent = label ? `${label}… 작성 내용과 직전 답변을 유지합니다.` : '';
   $('cancel-run').hidden = !pendingRun;
   $('case-fields').disabled = busy || !appReady;
-  const controls = ['save-case', 'load-example', 'settings-open', 'reset-open', 'save-answer', 'restore-version', 'save-checks', 'confirm-button', 'refresh-providers', 'connect-gemini', 'disconnect-gemini', 'web-manager-open', 'connection-disconnect'];
+  const controls = ['save-case', 'load-example', 'settings-open', 'reset-open', 'save-answer', 'edit-resolved', 'restore-version', 'save-checks', 'confirm-button', 'refresh-providers', 'connect-gemini', 'disconnect-gemini', 'web-manager-open', 'connection-disconnect'];
   for (const id of controls) $(id).disabled = busy || !appReady;
   $('answer-editor').readOnly = busy || !isCurrent();
   $('rewrite-instructions').disabled = busy;
@@ -169,7 +170,9 @@ async function saveCase() {
 async function saveAnswer() {
   if (!answerDirty || !currentVersion()) return;
   const answer = $('answer-editor').value;
-  await api('/api/edit', { answer, expectedRevision: state.revision });
+  const resolvedUnresolved = Boolean(currentVersion().unresolved?.length) && $('edit-resolved').checked;
+  await api('/api/edit', { answer, expectedRevision: state.revision, resolvedUnresolved });
+  $('edit-resolved').checked = false;
   answerDirty = false;
   viewId = state.currentVersionId;
   render({ syncAnswer: true });
@@ -233,6 +236,10 @@ function render({ syncAnswer = false } = {}) {
     $('save-answer').hidden = !isCurrent();
     $('restore-version').disabled = busy;
     $('answer-edit-hint').textContent = isCurrent() ? '직접 수정한 내용은 새 버전으로 저장됩니다. 저장 후 재검토가 필요합니다.' : '이전 버전을 읽고 있습니다. 복원하면 새 버전이 만들어집니다.';
+    const editUnresolved = isCurrent() ? version.unresolved || [] : [];
+    if (renderedEditVersionId !== version.id) { $('edit-resolved').checked = false; renderedEditVersionId = version.id; }
+    $('edit-unresolved').hidden = !editUnresolved.length;
+    $('edit-unresolved-list').replaceChildren(...editUnresolved.map((item) => element('li', item)));
     renderReview(version);
     renderVerification(version);
     renderDiff(version);

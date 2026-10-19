@@ -15,9 +15,16 @@ const selections={draft:{provider:'claude',model:'default'},review:{provider:'cl
 async function external(c){await c.request('/api/case',example);await c.request('/api/providers/refresh',{});await c.request('/api/settings',{selections});}
 
 test('가상 사례 전체 흐름과 서버 측 확정 차단을 검증한다',async t=>{
- const {c}=await setup(t);await c.request('/api/case',example);let response=await c.request('/api/run',{stage:'draft'});assert.equal(response.status,200);assert.equal(response.state.versions.length,1);response=await c.request('/api/confirm',{});assert.equal(response.error.code,'CONFIRM_BLOCKED');response=await c.request('/api/run',{stage:'review'});assert.equal(response.state.versions[0].review.mapping.length,2);
+ const {c}=await setup(t);await c.request('/api/case',example);let response=await c.request('/api/run',{stage:'draft'});assert.equal(response.status,200);assert.equal(response.state.versions.length,1);response=await c.request('/api/confirm',{});assert.equal(response.error.code,'CONFIRM_BLOCKED');response=await c.request('/api/run',{stage:'review'});assert.equal(response.state.versions[0].review.mapping.length,2);assert.ok(response.state.versions[0].review.mapping.every(m=>m.answered));assert.equal(response.state.versions[0].review.findings.filter(f=>f.severity==='blocker').length,0);
  response=await c.request('/api/checks',{checks:{facts:true,privacy:true,jurisdiction:true,deadline:true,sources:true}});assert.equal(response.state.versions[0].gate.canConfirm,true);response=await c.request('/api/confirm',{});assert.equal(response.state.versions[0].confirmed,true);
  response=await c.request('/api/restore',{versionId:response.state.currentVersionId});assert.equal(response.state.versions.length,2);assert.equal(response.state.versions[1].confirmed,false);assert.equal(response.state.versions[1].review,null);
+});
+test('수동 편집은 미해소 확인사항을 승계하고 담당자가 해결을 확인할 때만 비운다',async t=>{
+ const {c}=await setup(t);await c.request('/api/case',{...example,case:{...example.case,facts:''}});let response=await c.request('/api/run',{stage:'draft'});const unresolved=response.state.versions[0].unresolved;assert.ok(unresolved.includes('처리 사실과 확인 자료'));
+ response=await c.request('/api/edit',{answer:'담당자가 고친 답변입니다.',expectedRevision:response.state.revision});assert.equal(response.status,200);assert.deepEqual(response.state.versions[1].unresolved,unresolved);
+ const invalid=await c.request('/api/edit',{answer:'다시 고친 답변입니다.',expectedRevision:response.state.revision,resolvedUnresolved:'yes'});assert.equal(invalid.error.code,'INVALID_INPUT');
+ response=await c.request('/api/edit',{answer:'다시 고친 답변입니다.',expectedRevision:response.state.revision,resolvedUnresolved:false});assert.equal(response.state.versions.length,3);assert.deepEqual(response.state.versions[2].unresolved,unresolved);
+ response=await c.request('/api/edit',{answer:'사실을 확인해 고친 답변입니다.',expectedRevision:response.state.revision,resolvedUnresolved:true});assert.deepEqual(response.state.versions[3].unresolved,[]);
 });
 test('외부 호출은 서버 동의 없이는 실행되지 않고 승인 receipt는 한 번만 사용된다',async t=>{
  const {c,calls}=await setup(t);await external(c);let response=await c.request('/api/run',{stage:'draft'});assert.equal(response.error.code,'CONSENT_REQUIRED');assert.equal(calls.length,0);
