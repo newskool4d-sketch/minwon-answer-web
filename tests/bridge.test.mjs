@@ -102,6 +102,19 @@ test('원격 연결 뒤에도 DNS 재바인딩 Host와 외부 페이지의 정�
   const response=await request('/',{headers:{origin,'x-minwon-session':remote.token,'sec-fetch-site':'cross-site'}});denied(response);
 });
 
+test('외부 링크의 로컬 화면 탐색만 허용하고 API·fetch·POST·변조 Host는 차단한다',async t=>{
+  const {base}=await setup(t);
+  const navigation={'sec-fetch-site':'cross-site','sec-fetch-mode':'navigate','sec-fetch-dest':'document'};
+  const raw=(route,method='GET',headers=navigation)=>new Promise((resolve,reject)=>{
+    const req=http.request(base+route,{method,headers},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>{let code;if(String(res.headers['content-type']||'').startsWith('application/json')){try{code=JSON.parse(Buffer.concat(chunks).toString('utf8')).error?.code;}catch{}}resolve({status:res.statusCode,code});});});req.on('error',reject);req.end();
+  });
+  let response=await raw('/');assert.equal(response.status,200);
+  for(const route of ['/api/session','/api/config']){response=await raw(route);assert.equal(response.status,403);assert.equal(response.code,'CROSS_SITE');}
+  response=await raw('/','GET',{'sec-fetch-site':'cross-site','sec-fetch-mode':'no-cors','sec-fetch-dest':'empty'});assert.equal(response.status,403);assert.equal(response.code,'CROSS_SITE');
+  response=await raw('/','POST');assert.equal(response.status,403);assert.equal(response.code,'CROSS_SITE');
+  response=await raw('/','GET',{...navigation,host:'public.example'});assert.equal(response.status,403);assert.equal(response.code,'INVALID_HOST');
+});
+
 test('원격 연결 해제와 로컬 전체 해제는 세션 및 미사용 코드를 폐기한다',async t=>{
   const {local,pair,issue,client}=await setup(t);const first=await pair();let response=await first.request('/api/pair/disconnect',{});assert.equal(response.status,200);response=await first.request('/api/session');denied(response);
   const second=await pair();const issued=await issue();response=await local.request('/api/pair/revoke',{});assert.equal(response.status,200);

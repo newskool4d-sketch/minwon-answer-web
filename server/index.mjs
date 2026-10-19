@@ -63,7 +63,8 @@ export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000,pa
         }
       }else{
         if(req.headers['x-minwon-session'])fail('INVALID_ORIGIN','웹 세션은 승인된 웹 origin에서만 사용할 수 있습니다.',403);
-        if(req.headers['sec-fetch-site']==='cross-site')fail('CROSS_SITE','다른 사이트의 요청은 허용하지 않습니다.',403);
+        const localPageNavigation=req.method==='GET'&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&!url.pathname.startsWith('/api/');
+        if(req.headers['sec-fetch-site']==='cross-site'&&!localPageNavigation)fail('CROSS_SITE','다른 사이트의 요청은 허용하지 않습니다.',403);
       }
       if(url.pathname==='/api/pair'){
         if(!remoteOrigin)fail('REMOTE_ONLY','웹 화면에서 연결 코드를 입력해 주세요.',403);
