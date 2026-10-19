@@ -75,7 +75,7 @@ export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000,pa
       }
       if(remoteOrigin&&!url.pathname.startsWith('/api/'))fail('NOT_FOUND','웹 연결에서는 API 요청만 허용합니다.',404);
       if(remoteOrigin&&url.pathname==='/api/health')session(req,res,remoteOrigin);
-      if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:'0.2.0',storage:'memory-only',deployment:'loopback-only',webPairing:true});
+      if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:'0.3.0',storage:'memory-only',deployment:'loopback-only',webPairing:true});
       if(url.pathname.startsWith('/api/')){
         const s=session(req,res,remoteOrigin);
         if(req.method==='GET'&&url.pathname==='/api/session'){decorateGemini(s);return json(res,200,{state:exportState(s.state),csrfToken:s.csrf});}
