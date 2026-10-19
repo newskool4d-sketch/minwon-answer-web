@@ -12,6 +12,7 @@ auth.json
 .vercel/
 dist/
 .local/
+.claude/
 docs/MVP-STATUS.md
 docs/provider-notes.md
 docs/codex-live-verification-*.json
