@@ -3,16 +3,10 @@ const stageNames = { draft: '초안 생성', review: '답변 검토', rewrite: '
 const providerNames = { demo: '데모', claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
 const caseKeys = ['title', 'field', 'type', 'direction', 'body', 'facts', 'questions', 'actions', 'department', 'receivedAt', 'deadline', 'evidenceText'];
 const statusNames = { connected: '연결됨', disconnected: '미연결', unavailable: '사용 불가', not_checked: '미확인', setup: '설정 필요', not_installed: '프로그램 미설치', needs_setup: '설정 필요', setup_required: '설정 필요', unverified: '미검증', expired: '인증 만료', limited: '사용량 제한', blocked: '사용 제한', authenticated: '인증 확인', ready: '사용 준비됨' };
-const hosted = !['localhost', '127.0.0.1', '[::1]', '::1'].includes(location.hostname);
-const localApiBase = 'http://127.0.0.1:8793';
-const connectionHelp = '브라우저의 로컬 기기 접근 허용, 내 PC 로컬 프로그램 실행(8793), 로컬 웹 연결 관리에서 이 웹 주소의 접근 허용을 확인하세요. 작성 내용은 화면에 유지됩니다.';
 let state;
 let config;
 let csrfToken = '';
-let remoteSessionToken = '';
 let appReady = false;
-let connectionBusy = false;
-let issuedCodeTimer;
 let busy = false;
 let pendingRun = false;
 let caseDirty = false;
@@ -45,9 +39,7 @@ function fail(error) {
 }
 
 async function api(path, body, { acceptState = true } = {}) {
-  if (hosted && !remoteSessionToken) throw Object.assign(new Error('내 PC에 먼저 연결하세요. 작성 내용은 화면에 유지됩니다.'), { code: 'LOCAL_CONNECTION_REQUIRED' });
-  const options = { credentials: hosted ? 'omit' : 'same-origin', headers: { Accept: 'application/json' }, cache: 'no-store', referrerPolicy: 'no-referrer' };
-  if (hosted) { options.mode = 'cors'; options.targetAddressSpace = 'loopback'; options.headers['X-Minwon-Session'] = remoteSessionToken; }
+  const options = { credentials: 'same-origin', headers: { Accept: 'application/json' }, cache: 'no-store', referrerPolicy: 'no-referrer' };
   if (body !== undefined) {
     options.method = 'POST';
     options.headers['Content-Type'] = 'application/json';
@@ -55,16 +47,12 @@ async function api(path, body, { acceptState = true } = {}) {
     options.body = JSON.stringify(body);
   }
   let response;
-  try { response = await fetch(hosted ? localApiBase + path : path, options); }
-  catch { throw Object.assign(new Error(hosted ? connectionHelp : '로컬 서버에 연결할 수 없습니다. 서버 실행 상태를 확인한 뒤 다시 시도하세요. 작성 내용은 화면에 유지됩니다.'), { code: 'NETWORK_ERROR' }); }
+  try { response = await fetch(path, options); }
+  catch { throw Object.assign(new Error('로컬 서버에 연결할 수 없습니다. 서버 실행 상태를 확인한 뒤 다시 시도하세요. 작성 내용은 화면에 유지됩니다.'), { code: 'NETWORK_ERROR' }); }
   let result;
   try { result = await response.json(); }
   catch { throw Object.assign(new Error('서버 응답 형식을 확인할 수 없습니다. 이전 입력과 답변을 유지합니다.'), { code: 'INVALID_RESPONSE' }); }
   if (!response.ok || result.error) {
-    if (hosted && (response.status === 401 || result.error?.code === 'BRIDGE_SESSION_REQUIRED')) {
-      remoteSessionToken = ''; csrfToken = ''; appReady = false;
-      updateConnectionUi(); openConnection();
-    }
     throw Object.assign(new Error(result.error?.message || `요청이 거부되었습니다 (${response.status}).`), { code: result.error?.code || `HTTP_${response.status}` });
   }
   if (result.csrfToken) csrfToken = result.csrfToken;
@@ -77,7 +65,7 @@ async function api(path, body, { acceptState = true } = {}) {
 
 async function task(label, action) {
   if (busy) return;
-  if (!appReady) { if (hosted) openConnection(); return; }
+  if (!appReady) return;
   busy = true;
   $('error-notice').hidden = true;
   setBusy(label);
@@ -91,7 +79,7 @@ function setBusy(label = '') {
   $('run-status-text').textContent = label ? `${label}… 작성 내용과 직전 답변을 유지합니다.` : '';
   $('cancel-run').hidden = !pendingRun;
   $('case-fields').disabled = busy || !appReady;
-  const controls = ['save-case', 'load-example', 'settings-open', 'reset-open', 'save-answer', 'edit-resolved', 'restore-version', 'save-checks', 'confirm-button', 'refresh-providers', 'connect-gemini', 'disconnect-gemini', 'web-manager-open', 'connection-disconnect'];
+  const controls = ['save-case', 'load-example', 'settings-open', 'reset-open', 'save-answer', 'edit-resolved', 'restore-version', 'save-checks', 'confirm-button', 'refresh-providers', 'connect-gemini', 'disconnect-gemini'];
   for (const id of controls) $(id).disabled = busy || !appReady;
   $('answer-editor').readOnly = busy || !isCurrent();
   $('rewrite-instructions').disabled = busy;
@@ -99,8 +87,6 @@ function setBusy(label = '') {
   $('human-checks').disabled = busy || !isCurrent();
   for (const control of document.querySelectorAll('#evidence-form input, #evidence-form textarea, #evidence-form button, #model-form select, #model-form button, .quick-prompts button, #review-findings input')) control.disabled = busy;
   for (const button of document.querySelectorAll('#provider-connections button')) button.disabled = busy || !state?.providers?.find((provider) => provider.id === button.dataset.provider)?.canLogin;
-  $('issue-pair-code').disabled = hosted || busy || !appReady || !$('pair-code-approved').checked;
-  for (const id of ['allowed-web-origin', 'pair-code-approved', 'revoke-web-connections']) $(id).disabled = hosted || busy || !appReady;
 }
 
 function currentVersion() { return state?.versions?.find((version) => version.id === state.currentVersionId); }
@@ -510,57 +496,11 @@ function exportText() {
   return { body: plainText($('answer-editor').value), status: final ? `담당자 확정${sourceLabel(version.source).includes('데모') ? ' · 가상 결과' : ''}` : `검토 전 초안${sourceLabel(version?.source).includes('데모') ? ' · 가상 결과' : ''}` };
 }
 
-function hasRetainedWork() { return caseDirty || answerDirty || Boolean($('case-body').value.trim() || $('answer-editor').value.trim()); }
-
 function updateConnectionUi() {
   document.body.classList.toggle('is-disconnected', !appReady);
   $('workbench').inert = !appReady;
-  $('connection-open').hidden = !hosted;
-  $('connection-open').textContent = appReady ? '새 연결' : '내 PC 연결';
-  $('connection-disconnect').hidden = !hosted || !remoteSessionToken;
-  $('connection-disconnect').disabled = busy || connectionBusy;
-  $('web-manager-open').hidden = hosted || config?.capabilities?.webPairing !== true;
-  $('web-manager-open').disabled = busy || !appReady;
-  $('connection-indicator').textContent = hosted ? appReady ? '웹 화면 · 내 PC 연결됨' : '웹 화면 · 내 PC 미연결' : '내 PC에서 작업 중';
-  $('session-note').textContent = hosted
-    ? '웹은 화면을 제공합니다. 작성 내용은 내 PC 서버와 이 브라우저 탭의 메모리에서 처리되며 새로고침하면 다시 연결해야 합니다.'
-    : '작성 내용은 현재 세션의 메모리에서만 보관됩니다. 서버를 종료하면 사라집니다.';
-  $('connection-retry').hidden = !remoteSessionToken;
-  $('retained-work').hidden = !hasRetainedWork();
+  $('connection-indicator').textContent = '내 PC에서 작업 중';
   setBusy();
-}
-
-function connectionMessage(message, error = false) {
-  const target = $(error ? 'connection-error' : 'connection-message');
-  target.textContent = message;
-  target.hidden = !message;
-  if (!error) $('connection-error').hidden = true;
-}
-
-function openConnection() {
-  if (!hosted) return;
-  for (const id of ['settings-dialog', 'consent-dialog', 'reset-dialog']) if ($(id).open) $(id).close();
-  $('web-origin').value = location.origin;
-  $('pair-code').value = '';
-  $('retained-work').hidden = !hasRetainedWork();
-  $('connection-retry').hidden = !remoteSessionToken;
-  if (!$('connection-dialog').open) $('connection-dialog').showModal();
-}
-
-function clearIssuedCode() {
-  clearTimeout(issuedCodeTimer);
-  $('issued-pair-code').value = '';
-  $('issued-code-section').hidden = true;
-  $('issued-code-details').textContent = '';
-}
-
-function openWebManager() {
-  if (hosted || !appReady || busy || config?.capabilities?.webPairing !== true) return;
-  $('pair-code-approved').checked = false;
-  $('issue-pair-code').disabled = true;
-  $('web-manager-message').hidden = true;
-  clearIssuedCode();
-  if (!$('web-manager-dialog').open) $('web-manager-dialog').showModal();
 }
 
 async function loadWorkspace() {
@@ -577,123 +517,6 @@ async function loadWorkspace() {
   if (!currentVersion()) $('answer-editor').value = '';
   appReady = true;
   hydrateCase(); updateConnectionUi(); render({ syncAnswer: true });
-}
-
-async function connectFromCode(event) {
-  event.preventDefault();
-  if (!hosted || connectionBusy || busy) return;
-  const code = $('pair-code').value.trim();
-  if (!code) { $('pair-code').focus(); return; }
-  if (hasRetainedWork() && !window.confirm('기존 화면의 작업을 새 연결 세션으로 바꿀까요? 필요한 입력·답변은 먼저 현재 작업 내려받기로 보관하세요. 취소하면 화면을 유지합니다.')) return;
-  connectionBusy = true;
-  $('pair-connect').disabled = true;
-  $('connection-retry').disabled = true;
-  connectionMessage('내 PC의 연결 허용과 코드를 확인하는 중입니다.');
-  try {
-    // The only unauthenticated cross-origin request: one explicit user gesture, fixed loopback.
-    const request = fetch(`${localApiBase}/api/pair`, {
-      method: 'POST', credentials: 'omit', mode: 'cors', targetAddressSpace: 'loopback',
-      cache: 'no-store', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(20_000),
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
-    });
-    $('pair-code').value = '';
-    let response;
-    try { response = await request; } catch { throw Object.assign(new Error(connectionHelp), { code: 'LOCAL_CONNECTION_FAILED' }); }
-    let result;
-    try { result = await response.json(); } catch { throw Object.assign(new Error(`연결 응답을 확인할 수 없습니다. ${connectionHelp}`), { code: 'INVALID_RESPONSE' }); }
-    if (!response.ok || result.error) throw Object.assign(new Error(`${result.error?.message || '연결 코드가 거부되었습니다.'} ${connectionHelp}`), { code: result.error?.code || 'PAIRING_FAILED' });
-    if (typeof result.sessionToken !== 'string' || !result.sessionToken || typeof result.csrfToken !== 'string' || !result.csrfToken) throw Object.assign(new Error('연결 인증 응답이 올바르지 않습니다. 로컬에서 새 코드를 발급하세요.'), { code: 'INVALID_PAIR_RESPONSE' });
-    remoteSessionToken = result.sessionToken;
-    csrfToken = result.csrfToken;
-    await loadWorkspace();
-    $('connection-dialog').close();
-    notice('내 PC의 작성 공간에 연결했습니다. AI 외부 전송은 각 단계에서 별도로 확인합니다.');
-  } catch (error) {
-    connectionMessage(`${error.code || 'CONNECTION_FAILED'} · ${error.message}`, true);
-    $('connection-retry').hidden = !remoteSessionToken;
-  } finally {
-    connectionBusy = false;
-    $('pair-connect').disabled = false;
-    $('connection-retry').disabled = false;
-  }
-}
-
-function bindConnectionEvents() {
-  $('connection-open').addEventListener('click', openConnection);
-  $('web-manager-open').addEventListener('click', openWebManager);
-  $('pair-form').addEventListener('submit', connectFromCode);
-  $('connection-dialog').addEventListener('close', () => { $('pair-code').value = ''; });
-  $('connection-retry').addEventListener('click', async () => {
-    if (!remoteSessionToken || connectionBusy || busy) return;
-    if (hasRetainedWork() && !window.confirm('기존 화면의 작업을 연결된 세션으로 바꿀까요? 필요한 내용을 먼저 내려받으세요.')) return;
-    connectionBusy = true; $('connection-retry').disabled = true;
-    try { await loadWorkspace(); $('connection-dialog').close(); notice('내 PC의 작성 공간을 다시 불러왔습니다.'); }
-    catch (error) { connectionMessage(`${error.code || 'CONNECTION_FAILED'} · ${error.message}`, true); }
-    finally { connectionBusy = false; $('connection-retry').disabled = false; }
-  });
-  $('copy-web-origin').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(location.origin); connectionMessage('현재 웹 주소를 복사했습니다. 로컬 웹 연결 관리에 붙여 넣으세요.'); }
-    catch { connectionMessage('주소를 직접 선택해 복사하세요. 클립보드 권한을 확인할 수 없습니다.', true); $('web-origin').select(); }
-  });
-  $('connection-disconnect').addEventListener('click', async () => {
-    if (!hosted || connectionBusy || busy || !remoteSessionToken) return;
-    if (hasRetainedWork() && !window.confirm('내 PC 연결을 해제할까요? 웹 세션은 끝나며 화면의 입력·답변은 내려받을 수 있도록 유지합니다.')) return;
-    connectionBusy = true; $('connection-disconnect').disabled = true;
-    let message = '내 PC 연결을 해제했습니다. 화면의 기존 작업은 유지됩니다.';
-    let disconnected = false;
-    try { const result = await api('/api/pair/disconnect', {}); message = result.message || message; disconnected = true; }
-    catch { message = '이 탭의 연결정보를 비웠습니다. 서버의 연결 해제는 확인하지 못했으므로 로컬 웹 연결 관리에서 모든 연결 해제를 사용하세요. 화면의 작업은 유지됩니다.'; }
-    finally {
-      remoteSessionToken = ''; csrfToken = ''; appReady = false; connectionBusy = false;
-      $('gemini-key').value = ''; updateConnectionUi(); openConnection(); connectionMessage(message, !disconnected);
-    }
-  });
-  $('download-retained-work').addEventListener('click', () => {
-    const labels = { title: '제목', field: '분야', type: '처리 유형', direction: '답변 방향', body: '민원 본문', facts: '확인된 사실', questions: '요구사항과 질문', actions: '조치·계획', department: '담당 기관·부서', receivedAt: '접수일', deadline: '처리기한', evidenceText: '근거 입력' };
-    const values = readCase();
-    const text = ['현재 화면의 작업 보관 · 검토 전 초안', ...caseKeys.filter(key => values[key]).map(key => `${labels[key]}\n${values[key]}`), `답변 본문\n${$('answer-editor').value}`].join('\n\n');
-    const url = URL.createObjectURL(new Blob(['\uFEFF', text], { type: 'text/plain;charset=utf-8' }));
-    const link = document.createElement('a'); link.href = url; link.download = 'minwon-answer-연결전-작업.txt'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1500);
-  });
-  $('pair-code-approved').addEventListener('change', () => { $('issue-pair-code').disabled = !$('pair-code-approved').checked || busy; });
-  $('pair-code-form').addEventListener('submit', event => {
-    event.preventDefault();
-    if (hosted || !appReady || !$('pair-code-approved').checked || busy || config?.capabilities?.webPairing !== true) return;
-    let origin;
-    try {
-      const value = $('allowed-web-origin').value.trim().replace(/\/$/, ''); const url = new URL(value);
-      if (url.protocol !== 'https:' || url.username || url.password || value !== url.origin) throw new Error();
-      origin = url.origin;
-    } catch { $('web-manager-message').textContent = '경로·쿼리가 없는 정확한 HTTPS 웹 주소를 입력하세요.'; $('web-manager-message').hidden = false; return; }
-    task('웹 연결 코드 발급', async () => {
-      try {
-        clearIssuedCode();
-        const result = await api('/api/pair/code', { origin, approved: true });
-        $('issued-pair-code').value = result.code;
-        $('issued-code-section').hidden = false;
-        $('issued-code-details').textContent = `${result.origin || origin} · 만료 ${formattedTime(result.expiresAt)} · 한 번만 사용 가능`;
-        $('pair-code-approved').checked = false;
-        $('issue-pair-code').disabled = true;
-        $('web-manager-message').textContent = '코드를 직접 복사하여 허용한 웹 화면에 입력하세요.'; $('web-manager-message').hidden = false;
-        issuedCodeTimer = setTimeout(() => { clearIssuedCode(); $('web-manager-message').textContent = '연결 코드의 표시 시간이 끝났습니다. 필요한 경우 다시 허용해 발급하세요.'; }, Math.max(0, Math.min(300_000, new Date(result.expiresAt).getTime() - Date.now())));
-      } catch (error) { $('web-manager-message').textContent = `${error.code || 'PAIR_CODE_FAILED'} · ${error.message}`; $('web-manager-message').hidden = false; throw error; }
-    });
-  });
-  $('copy-pair-code').addEventListener('click', async () => {
-    if (!$('issued-pair-code').value) return;
-    try { await navigator.clipboard.writeText($('issued-pair-code').value); $('web-manager-message').textContent = '일회용 코드를 복사했습니다. 허용한 웹 화면에만 입력하세요.'; }
-    catch { $('web-manager-message').textContent = '코드를 직접 선택해 복사하세요. 클립보드 권한을 확인할 수 없습니다.'; $('issued-pair-code').select(); }
-    $('web-manager-message').hidden = false;
-  });
-  $('revoke-web-connections').addEventListener('click', () => {
-    if (hosted || !appReady || busy || config?.capabilities?.webPairing !== true) return;
-    task('모든 웹 연결 해제', async () => {
-      try { const result = await api('/api/pair/revoke', {}); clearIssuedCode(); $('pair-code-approved').checked = false; $('issue-pair-code').disabled = true; $('web-manager-message').textContent = result.message || '모든 웹 연결·발급 코드를 해제했습니다. 로컬 작성 내용은 유지됩니다.'; $('web-manager-message').hidden = false; }
-      catch (error) { $('web-manager-message').textContent = `${error.code || 'REVOKE_FAILED'} · ${error.message}`; $('web-manager-message').hidden = false; throw error; }
-    });
-  });
-  $('web-manager-dialog').addEventListener('close', () => { clearIssuedCode(); $('pair-code-approved').checked = false; $('issue-pair-code').disabled = true; });
-  window.addEventListener('hashchange', () => { if (location.hash === '#web-connection') openWebManager(); });
 }
 
 function bindEvents() {
@@ -791,11 +614,9 @@ function bindEvents() {
 }
 
 async function init() {
-  bindEvents(); bindConnectionEvents(); updateConnectionUi();
-  if (hosted) { openConnection(); return; }
+  bindEvents(); updateConnectionUi();
   try {
     await loadWorkspace();
-    if (location.hash === '#web-connection') openWebManager();
   } catch (error) { appReady = false; updateConnectionUi(); fail(error); }
 }
 

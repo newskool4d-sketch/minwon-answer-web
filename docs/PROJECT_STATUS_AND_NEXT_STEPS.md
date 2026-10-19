@@ -1,9 +1,9 @@
 # minwon-answer 작업 현황 및 다음 과제
 
 - 정리 기준일: 2026-10-20
-- 저장소: [newskool4d-sketch/minwon-answer-web](https://github.com/newskool4d-sketch/minwon-answer-web) — 공개(2026-10-20 확인). 공개 유지 여부는 3장 6번 과제에서 확정
+- 저장소: [newskool4d-sketch/minwon-answer-web](https://github.com/newskool4d-sketch/minwon-answer-web) — 공개(2026-10-20 확인). 공개 유지 여부는 3장 5번 과제에서 확정
 - 현재 릴리스: [v0.4.0](https://github.com/newskool4d-sketch/minwon-answer-web/releases/tag/v0.4.0)
-- 웹 화면(Vercel `minwon-answer-web.vercel.app`): 삭제 예정(2026-10-20 결정). v0.4.0에서 갱신하지 않음
+- 웹 화면(Vercel `minwon-answer-web.vercel.app`): 프로젝트 삭제(2026-10-20). 웹 연결 기능은 v0.4.1에서 제거(릴리스 준비)
 
 ## 1. 완료한 작업
 
@@ -11,7 +11,7 @@
 
 - 민원 분야 선택과 **초안 생성 → 검토 → 재작성 → 담당자 확정** 흐름. 실제 발송 기능 없음
 - 단계별 AI 제공사 설정, 전송 미리보기·단계별 동의, 가상 사례 우선, 실자료 외부 전송 차단
-- Vercel 웹과 로컬 앱을 잇는 PC 연결 코드 기능(Vercel 삭제 후 미사용)
+- Vercel 웹과 로컬 앱을 잇는 PC 연결 코드 기능(v0.4.1에서 제거)
 - Windows x64 실행 파일(앱 + Node.js 런타임, self-test 포함). 첫 실행 시 `%LOCALAPPDATA%\Programs\minwon-answer\<버전>`에 사용자 단위로 설치하고 시작 메뉴 바로가기 '민원답변 도우미' 생성(관리자 권한 불필요)
 
 ### v0.4.0 (2026-10-20)
@@ -25,6 +25,15 @@
 | 검증 | 자동 테스트 76개 통과, 구문 검사 통과. 빌드 시 EXE self-test 통과. GitHub 릴리스에서 내려받은 EXE의 SHA-256이 `.sha256`·자산 digest와 일치 |
 | 배포 파일 | `minwon-answer-0.4.0-win-x64.exe` 34,234,368 bytes, SHA-256 `cabb7fb5f3ca3be914488abc39c530d012f07db47f7bf6244b5b471c013ca5b8`. Authenticode 서명 없음(SmartScreen 경고 가능) |
 
+### v0.4.1 (릴리스 준비, 2026-10-20)
+
+| 구분 | 내용 |
+|---|---|
+| 서버 | 웹 연결 API 4개(`/api/pair*`)·원격 세션·CORS 제거. 로컬 출처(`http://127.0.0.1:<port>`·`http://localhost:<port>`)가 아닌 Origin의 요청은 CORS 헤더 없이 403 `CROSS_ORIGIN`. Host 검사·사이트 간 요청 차단·CSRF·단계별 동의는 유지 |
+| 화면 | 웹 연결 모드·'웹 연결 관리'·PC 연결 코드 대화상자 제거. 같은 출처 호출만 사용 |
+| 파일 | `vercel.json`·`scripts/build-web.mjs`·`tests/bridge.test.mjs` 삭제, `npm run build` 제거. `docs/DEPLOYMENT.md`는 '로컬 실행과 보안 경계'로 재작성, README·`docs/WINDOWS-EXE.md`·`docs/api-contract.md` 갱신 |
+| 검증 | 자동 테스트 72개 통과(웹 연결 테스트 10개 삭제, 로컬 경계·세션 만료·키 분리 테스트 6개 추가), 구문 검사 통과. 로컬 화면에서 콘솔 오류 0건, 가상 예시 초안·검토 정상 |
+
 ## 2. 현재 동작 방식
 
 | 항목 | 내용 |
@@ -33,24 +42,24 @@
 | Codex | 앱 전용 홈 `%LOCALAPPDATA%\minwon-answer\codex-home`. CLI 0.160.0 정확히 필요, npm 설치본 우선(npm 설치가 0.160.0이 아니면 독립 설치가 있어도 setup). 최초 로그인은 설치 폴더의 `codex-login.ps1` 실행 |
 | Claude Code | 네이티브 설치 경로 `~\.local\bin\claude.exe`에서만 감지(npm 등 다른 설치 방식은 미감지). 사용자 PC의 Claude Code 로그인(`~/.claude`)을 공유하며 앱 전용 분리 없음, 사용자가 지정한 `CLAUDE_CONFIG_DIR`은 전달하지 않음. claude.ai 로그인만 허용. 실행 옵션으로 개인 설정·지침·도구 비활성(기관 관리 정책은 그대로 적용) |
 | Gemini | 사용자 API Key, 세션 메모리에만 보관 |
-| 작업 세션 | 서버 메모리에만 보관. 서버 종료 시, 또는 로컬·웹 구분 없이 마지막 요청 후 30분이 지나면 삭제 |
+| 작업 세션 | 서버 메모리에만 보관. 서버 종료 시, 또는 마지막 요청 후 30분이 지나면 삭제 |
 | 내보내기 | 답변 본문 txt·md 내려받기와 인쇄 가능. 버전·검토·근거 기록 전체의 내보내기·불러오기는 없음 |
 | 실자료 | 자료 구분을 '실제 민원·내부 자료'로 고르면 외부 AI 전송 차단. 담당자 선택 기준이며 내용으로 판별하지 않음 |
-| 웹 연결 | Vercel 삭제 후 사용처 없음. 코드·문서 정리 예정(3장 1번 과제) |
+| 접근 경계 | 로컬 화면 전용(v0.4.1부터). 화면과 API는 같은 출처에서만 동작하고, 다른 출처의 API 요청은 403. 다른 사이트에서는 링크로 로컬 첫 화면을 여는 것만 허용 |
 
 알려진 제약: 서버는 홈 폴더 기준(`AppData\Local`)으로 Codex 홈을 계산하고 `codex-login.ps1`은 `$env:LOCALAPPDATA`를 씀. AppData 폴더 리디렉션 환경에서는 두 경로가 달라질 수 있음.
 
 ## 3. 다음 과제(우선순위)
 
-1. **v0.4.1 웹 연결 제거**(Vercel 삭제 후): 연결 API·CORS·연결 관리 UI·`/api/health`의 `webPairing`·`vercel.json`·`scripts/build-web.mjs`와 `package.json` build 스크립트 정리. `tests/bridge.test.mjs` 정리(테스트 수 변경), README·`docs/DEPLOYMENT.md`·`docs/WINDOWS-EXE.md`·`docs/api-contract.md` 갱신
-2. **작업 유실 방지**: 로컬 세션 30분 만료 분리 또는 연장, 작업 전체(입력·버전·검토·근거) 내보내기·불러오기, 내부 검토표 내보내기
-3. **앱 안 로그인·로그아웃**: Codex는 로컬 화면 전용으로 `codex login`/`codex logout` 실행, Claude는 보이는 콘솔로 `claude auth login` 실행 후 상태 확인
-4. **검사 정밀도 보정**(실제 답변 표본 필요)
+1. **작업 유실 방지**: 로컬 세션 30분 만료 분리 또는 연장, 작업 전체(입력·버전·검토·근거) 내보내기·불러오기, 내부 검토표 내보내기
+2. **앱 안 로그인·로그아웃**: Codex는 로컬 화면 전용으로 `codex login`/`codex logout` 실행, Claude는 보이는 콘솔로 `claude auth login` 실행 후 상태 확인
+3. **검사 정밀도 보정**(실제 답변 표본 필요)
    - 정상 답변 오차단: 경찰서·보건소 이송, 같은 기관 과·팀 재지정, '같은 법·동법' 인용, '헌법' 인용
    - 놓치는 경우: '○○규정·훈령·고시·지침 제N조' 같은 괄호 없는 인용, 관계없는 수기 확인 기록이 1건이라도 있으면 조문 번호만 있는 인용이 통과
    - AI 재작성이 미해소 목록을 비워 돌려주면 담당자 확인 없이 해제됨
-5. **번들 Node.js 보안 업데이트**: v24.14.1 이후 24.x 보안 릴리스(2026-10-19 조회: v24.17.0·v24.18.1, 10-21 보안 릴리스 예고) 반영 후 재빌드
-6. **배포 신뢰**: 코드 서명 인증서, 저장소 공개 여부 확정
+4. **번들 Node.js 보안 업데이트**: v24.14.1 이후 24.x 보안 릴리스(2026-10-19 조회: v24.17.0·v24.18.1, 10-21 보안 릴리스 예고) 반영 후 재빌드
+5. **배포 신뢰**: 코드 서명 인증서, 저장소 공개 여부 확정
+6. **로컬 경계 보강**: 같은 PC의 다른 포트(같은 사이트)에서 Origin 없이 보내는 `/api/` GET도 거부할지 검토(현재는 `Cross-Origin-Resource-Policy: same-origin`으로 응답 읽기만 차단)
 
 ## 4. 로그인 방식 검토 결과(2026-10-19 공식 문서 조회 기준, 변동 가능)
 

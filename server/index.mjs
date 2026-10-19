@@ -11,27 +11,22 @@ const randomToken=()=>randomBytes(32).toString('hex');
 const sameToken=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml'};
 
-export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000,pairTtlMs=5*60*1000}={}){
+export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000}={}){
   const sessions=new Map();
-  const pairingCodes=new Map();
-  const remoteTokens=new Map();
   let cachedProviders=[];
   const server=http.createServer(handler);
-  function dropSession(id){const s=sessions.get(id);if(s){s.abort?.abort();s.apiKey=undefined;s.previews.clear();sessions.delete(id);}for(const [key,value] of remoteTokens){if(value===id)remoteTokens.delete(key);}}
-  function expire(){const now=Date.now();for(const [id,s] of sessions){if(now-s.seen>sessionTtlMs)dropSession(id);}for(const [code,pair] of pairingCodes){if(pair.expiresAt<=now)pairingCodes.delete(code);}}
+  function dropSession(id){const s=sessions.get(id);if(s){s.abort?.abort();s.apiKey=undefined;s.previews.clear();sessions.delete(id);}}
+  function expire(){const now=Date.now();for(const [id,s] of sessions){if(now-s.seen>sessionTtlMs)dropSession(id);}}
   const timer=setInterval(expire,30000);timer.unref();
-  server.on('close',()=>{clearInterval(timer);for(const id of sessions.keys())dropSession(id);pairingCodes.clear();remoteTokens.clear();});
+  server.on('close',()=>{clearInterval(timer);for(const id of sessions.keys())dropSession(id);});
   function json(res,status,data){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(data));}
-  function makeSession(res,remoteOrigin=null){
+  function makeSession(res){
     if(sessions.size>=32){const oldest=[...sessions.entries()].find(([,s])=>!s.state.running);if(oldest)dropSession(oldest[0]);else fail('SESSION_LIMIT','열린 작업이 너무 많습니다. 사용하지 않는 창을 닫아 주세요.',429);}
-    const id=randomToken();const s={id,remoteOrigin,state:newState(),csrf:randomToken(),seen:Date.now(),apiKey:undefined,previews:new Map(),abort:null};s.state.providers=[clone(demoProvider),...clone(cachedProviders)];sessions.set(id,s);if(!remoteOrigin)res.setHeader('Set-Cookie',`minwon_session=${id}; HttpOnly; SameSite=Strict; Path=/`);return s;
+    const id=randomToken();const s={id,state:newState(),csrf:randomToken(),seen:Date.now(),apiKey:undefined,previews:new Map(),abort:null};s.state.providers=[clone(demoProvider),...clone(cachedProviders)];sessions.set(id,s);res.setHeader('Set-Cookie',`minwon_session=${id}; HttpOnly; SameSite=Strict; Path=/`);return s;
   }
-  function session(req,res,remoteOrigin){
-    if(remoteOrigin){const token=req.headers['x-minwon-session'];const id=typeof token==='string'&&/^[a-f0-9]{64}$/.test(token)?remoteTokens.get(hash(token)):undefined;const s=id?sessions.get(id):undefined;if(!s||s.remoteOrigin!==remoteOrigin)fail('BRIDGE_SESSION_REQUIRED','웹 연결이 없거나 만료됐습니다. 로컬 화면에서 새 연결 코드를 발급해 주세요.',403);s.seen=Date.now();return s;}
-    const id=req.headers.cookie?.match(/(?:^|;\s*)minwon_session=([a-f0-9]{64})(?:;|$)/)?.[1];let s=id?sessions.get(id):undefined;if(s?.remoteOrigin)s=undefined;if(!s)s=makeSession(res);s.seen=Date.now();return s;
+  function session(req,res){
+    const id=req.headers.cookie?.match(/(?:^|;\s*)minwon_session=([a-f0-9]{64})(?:;|$)/)?.[1];let s=id?sessions.get(id):undefined;if(!s)s=makeSession(res);s.seen=Date.now();return s;
   }
-  function approvedOrigin(origin){return [...pairingCodes.values()].some(pair=>pair.origin===origin)||[...sessions.values()].some(s=>s.remoteOrigin===origin);}
-  function webOrigin(value){let parsed;try{parsed=new URL(value);}catch{fail('INVALID_WEB_ORIGIN','HTTPS 웹 주소의 origin을 입력해 주세요.');}if(typeof value!=='string'||value.length>250||parsed.protocol!=='https:'||parsed.port||parsed.username||parsed.password||parsed.search||parsed.hash||parsed.pathname!=='/'||parsed.origin!==value.replace(/\/$/,''))fail('INVALID_WEB_ORIGIN','경로·인증정보·별도 포트가 없는 정확한 HTTPS 웹 origin을 입력해 주세요.');return parsed.origin;}
   function requireIdle(s){if(s.state.running)fail('BUSY','현재 실행을 완료하거나 취소한 뒤 다시 시도해 주세요.',409);}
   function invalidate(s){for(const v of s.state.versions)v.confirmed=false;s.previews.clear();s.state.revision++;}
   async function body(req){let bytes=0;const chunks=[];for await(const chunk of req){bytes+=chunk.length;if(bytes>512*1024)fail('BODY_TOO_LARGE','요청이 너무 큽니다. 입력 내용을 줄여 주세요.',413);chunks.push(chunk);}try{const result=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');if(!result||typeof result!=='object'||Array.isArray(result))throw new Error();return result;}catch{fail('INVALID_JSON','요청 형식이 올바르지 않습니다.');}}
@@ -50,54 +45,20 @@ export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000,pa
     try{
       const port=server.address()?.port;const permitted=[`127.0.0.1:${port}`,`localhost:${port}`];
       if(!permitted.includes(req.headers.host))fail('INVALID_HOST','로컬 주소로 접속해 주세요.',403);
+      if(req.headers.origin!==undefined&&!permitted.some(h=>req.headers.origin===`http://${h}`))fail('CROSS_ORIGIN','다른 사이트의 요청은 허용하지 않습니다.',403);
       const url=new URL(req.url,`http://127.0.0.1:${port}`);
       expire();
-      const remoteOrigin=req.headers.origin&&!permitted.some(h=>req.headers.origin===`http://${h}`)?req.headers.origin:null;
-      if(remoteOrigin){
-        if(!approvedOrigin(remoteOrigin))fail('INVALID_ORIGIN','로컬 화면에서 이 웹 주소를 명시적으로 승인하고 연결 코드를 발급해 주세요.',403);
-        res.setHeader('Access-Control-Allow-Origin',remoteOrigin);res.setHeader('Vary','Origin');res.setHeader('Cross-Origin-Resource-Policy','cross-origin');
-        if(req.method==='OPTIONS'){
-          const method=req.headers['access-control-request-method'];const headers=String(req.headers['access-control-request-headers']||'').toLowerCase().split(',').map(v=>v.trim()).filter(Boolean);
-          if(!url.pathname.startsWith('/api/')||!['GET','POST'].includes(method)||headers.some(h=>!['accept','content-type','x-csrf-token','x-minwon-session'].includes(h)))fail('CORS_NOT_ALLOWED','허용되지 않은 웹 연결 요청입니다.',403);
-          res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');res.setHeader('Access-Control-Allow-Headers','Accept, Content-Type, X-CSRF-Token, X-Minwon-Session');res.setHeader('Access-Control-Max-Age','0');res.writeHead(204);res.end();return;
-        }
-      }else{
-        if(req.headers['x-minwon-session'])fail('INVALID_ORIGIN','웹 세션은 승인된 웹 origin에서만 사용할 수 있습니다.',403);
-        const localPageNavigation=req.method==='GET'&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&!url.pathname.startsWith('/api/');
-        if(req.headers['sec-fetch-site']==='cross-site'&&!localPageNavigation)fail('CROSS_SITE','다른 사이트의 요청은 허용하지 않습니다.',403);
-      }
-      if(url.pathname==='/api/pair'){
-        if(!remoteOrigin)fail('REMOTE_ONLY','웹 화면에서 연결 코드를 입력해 주세요.',403);
-        if(req.method!=='POST'||!String(req.headers['content-type']||'').startsWith('application/json'))fail('JSON_REQUIRED','JSON POST 요청만 허용합니다.',415);
-        const data=await body(req);const code=typeof data.code==='string'&&/^[a-f0-9]{64}$/.test(data.code)?hash(data.code):'';const pair=pairingCodes.get(code);
-        if(!pair||pair.origin!==remoteOrigin||pair.expiresAt<=Date.now())fail('PAIRING_INVALID','연결 코드가 없거나 만료·사용됐습니다. 새 코드를 발급해 주세요.',403);
-        pairingCodes.delete(code);const s=makeSession(res,remoteOrigin);const token=randomToken();remoteTokens.set(hash(token),s.id);json(res,200,{sessionToken:token,csrfToken:s.csrf});return;
-      }
-      if(remoteOrigin&&!url.pathname.startsWith('/api/'))fail('NOT_FOUND','웹 연결에서는 API 요청만 허용합니다.',404);
-      if(remoteOrigin&&url.pathname==='/api/health')session(req,res,remoteOrigin);
-      if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:'0.4.0',storage:'memory-only',deployment:'loopback-only',webPairing:true});
+      const localPageNavigation=req.method==='GET'&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&!url.pathname.startsWith('/api/');
+      if(req.headers['sec-fetch-site']==='cross-site'&&!localPageNavigation)fail('CROSS_SITE','다른 사이트의 요청은 허용하지 않습니다.',403);
+      if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:'0.4.0',storage:'memory-only',deployment:'loopback-only'});
       if(url.pathname.startsWith('/api/')){
-        const s=session(req,res,remoteOrigin);
+        const s=session(req,res);
         if(req.method==='GET'&&url.pathname==='/api/session'){decorateGemini(s);return json(res,200,{state:exportState(s.state),csrfToken:s.csrf});}
-        if(req.method==='GET'&&url.pathname==='/api/config')return json(res,200,{fields,types,directions,example,capabilities:{webPairing:true}});
+        if(req.method==='GET'&&url.pathname==='/api/config')return json(res,200,{fields,types,directions,example});
         if(req.method!=='POST')fail('METHOD_NOT_ALLOWED','허용되지 않은 요청 방식입니다.',405);
         if(!sameToken(req.headers['x-csrf-token'],s.csrf))fail('CSRF_REQUIRED','세션 확인에 실패했습니다. 페이지를 새로 열어 주세요.',403);
         if(!String(req.headers['content-type']||'').startsWith('application/json'))fail('JSON_REQUIRED','JSON 요청만 허용합니다.',415);
         const data=await body(req);const route=url.pathname;
-        if(route==='/api/pair/code'){
-          if(remoteOrigin)fail('LOCAL_ONLY','연결 승인은 로컬 화면에서만 할 수 있습니다.',403);
-          if(data.approved!==true)fail('PAIRING_APPROVAL_REQUIRED','이 웹 주소의 PC 연결 권한을 명시적으로 확인해 주세요.',403);
-          const origin=webOrigin(data.origin);if(pairingCodes.size>=8)fail('PAIRING_LIMIT','발급한 연결 코드가 너무 많습니다. 만료 후 다시 발급하거나 웹 연결을 해제해 주세요.',429);
-          const code=randomToken();const expiresAt=Date.now()+pairTtlMs;pairingCodes.set(hash(code),{origin,expiresAt});return json(res,200,{code,origin,expiresAt:new Date(expiresAt).toISOString()});
-        }
-        if(route==='/api/pair/revoke'){
-          if(remoteOrigin)fail('LOCAL_ONLY','웹 연결 해제 관리는 로컬 화면에서 진행해 주세요.',403);
-          for(const [id,value]of sessions){if(value.remoteOrigin)dropSession(id);}pairingCodes.clear();return json(res,200,{message:'모든 웹 연결과 미사용 연결 코드를 해제했습니다.'});
-        }
-        if(route==='/api/pair/disconnect'){
-          if(!remoteOrigin)fail('REMOTE_ONLY','웹 화면에서 연결을 해제해 주세요.',403);
-          dropSession(s.id);return json(res,200,{disconnected:true,message:'이 웹 화면의 PC 연결을 해제했습니다.'});
-        }
         if(route==='/api/cancel'){s.abort?.abort();return json(res,200,{state:exportState(s.state),message:s.abort?'취소 요청을 보냈습니다.':'실행 중인 작업이 없습니다.'});}
         requireIdle(s);
         if(route==='/api/case'){

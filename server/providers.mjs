@@ -206,7 +206,7 @@ function safeEnvironment(env = process.env) {
   return result;
 }
 
-// Status messages reach paired web origins: never include the raw user folder name.
+// Status messages are shown in the browser UI: never include the raw user folder name.
 function homeRelative(path, env = process.env) {
   const normal = value => String(value ?? '').replaceAll('/', '\\').replace(/\\+$/, '');
   const target = normal(path);

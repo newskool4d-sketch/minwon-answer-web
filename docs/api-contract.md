@@ -34,15 +34,10 @@ POST API:
 - `/api/confirm` `{}` : 서버 gate canConfirm true만 확정. 데모도 가상 결과로 표시.
 - `/api/reset` `{}` : 현재 세션 지우고 새 빈 문서(키도 메모리 삭제). 사용자 확인 버튼.
 
-클라이언트 정적 설정 GET `/api/config` -> `{fields:[{id,label,hint,checks:[]}],types:[],directions:[],example:{case,classification},capabilities:{webPairing:true}}`. field id는 `general,curriculum,personnel,student,special,admission,care,facility,health,budget,disclosure,other`. 파일 읽기/첨부 파싱·기관 공식 발송은 MVP 외.
+클라이언트 정적 설정 GET `/api/config` -> `{fields:[{id,label,hint,checks:[]}],types:[],directions:[],example:{case,classification}}`. 상태 확인 GET `/api/health` -> `{ok:true,version,storage:'memory-only',deployment:'loopback-only'}`. field id는 `general,curriculum,personnel,student,special,admission,care,facility,health,budget,disclosure,other`. 파일 읽기/첨부 파싱·기관 공식 발송은 MVP 외.
 
-Vercel에는 정적 화면만 배포한다. 로컬 companion 기본 주소는 `http://127.0.0.1:8793`. 로컬 쿠키 세션과 웹 연결 세션은 별개이며 사례·API Key를 공유하지 않는다. 웹 연결은 정확히 승인한 HTTPS Origin과 메모리 전용 `X-Minwon-Session` 토큰에 바인딩되고 변경 요청의 CSRF 검사도 유지한다. 연결 토큰·인증 정보는 URL·디스크·Vercel 환경변수에 저장하지 않는다.
+로컬 전용 구성. 기본 주소 `http://127.0.0.1:8793`(`MINWON_PORT`로 변경). 화면과 API는 같은 출처이며 쿠키 세션으로만 호출한다. Host는 `127.0.0.1:<port>`·`localhost:<port>`만 허용(`INVALID_HOST` 403). Origin 헤더가 있으면 `http://127.0.0.1:<port>`·`http://localhost:<port>`만 허용하고 그 외는 `CROSS_ORIGIN` 403이며 CORS 헤더를 보내지 않는다(preflight 포함). `Sec-Fetch-Site: cross-site` 요청은 `/api/` 외 경로의 최상위 문서 GET 탐색만 허용하고 나머지는 `CROSS_SITE` 403. 정의되지 않은 API 경로는 POST가 아니면 `METHOD_NOT_ALLOWED` 405, POST면 CSRF·형식 확인 뒤 실행 중이면 `BUSY` 409, 그 외 `NOT_FOUND` 404.
 
-- POST `/api/pair/code` 로컬 전용 `{origin,approved:true}`: 로컬 쿠키·CSRF와 명시 동의 필요. 정확한 HTTPS Origin에 유효한 5분 일회용 코드 반환.
-- POST `/api/pair` 승인된 원격 Origin에서 `{code}`: 코드를 소비하고 독립 세션의 `{sessionToken,csrfToken}` 반환. 쿠키 미발급.
-- POST `/api/pair/disconnect` 원격 세션·CSRF 필요: 현재 연결 폐기.
-- POST `/api/pair/revoke` 로컬 전용·CSRF 필요: 모든 웹 연결과 미사용 코드 폐기.
-
-세션 유휴 30분 만료. 원격 최초 로드는 연결 요청을 자동 전송하지 않는다. 사용자가 코드를 입력한 이후에만 고정 loopback 주소로 CORS 요청한다. 브라우저의 로컬 기기 접근 권한이 추가로 필요할 수 있다. 상세 운용은 [배포 안내](DEPLOYMENT.md) 참조.
+세션 유휴 30분 만료. 상세 운용은 [로컬 실행과 보안 경계](DEPLOYMENT.md) 참조.
 
 클라이언트는 textarea/input 값 textContent 중심으로 안전 렌더링. 답변 수동편집 저장 후 run. 상태 변경 응답마다 전체 state 교체. 외부 미리보기 동의 모달은 단계마다 기본 미체크. 드롭다운 provider demo/claude/codex/gemini. 취소 버튼은 run pending에서도 별도 요청 가능. 폼 보관은 브라우저 메모리만, localStorage/IndexedDB 금지.
