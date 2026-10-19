@@ -166,7 +166,7 @@ function snapshotFiles(directory) {
   return files;
 }
 
-function fakeCodex({ version = 'codex-cli 0.160.0', help = requiredFlags.join(' '), models = catalog, loggedIn = true, outputEvents = events(), splitBytes = false, hang = false, onGeneration, stdinError = false, deferClose = false, instructionsFile } = {}) {
+function fakeCodex({ version = 'codex-cli 0.160.0', help = requiredFlags.join(' '), models = catalog, loggedIn = true, outputEvents = events(), splitBytes = false, hang = false, onGeneration, stdinError = false, deferClose = false, instructionsFile, testPaths = paths, missing = [] } = {}) {
   const calls = [];
   const spawnImpl = (binary, args, options) => {
     const child = new EventEmitter();
@@ -199,9 +199,9 @@ function fakeCodex({ version = 'codex-cli 0.160.0', help = requiredFlags.join(' 
   const provider = createProviderService({ spawnImpl, exists: async path => {
     const instructions = /(?:^|[\\/])(AGENTS(?:\.override)?\.md)$/i.exec(path);
     if (instructions) return instructions[1] === instructionsFile;
-    return path !== paths.claude;
-  }, paths, codexHome, environment: {
-    PATH: 'safe', USERPROFILE: 'C:/fixture-user', OPENAI_API_KEY: 'must-not-forward', OPENAI_BASE_URL: 'https://untrusted.invalid',
+    return path !== testPaths.claude && !missing.includes(path);
+  }, paths: testPaths, codexHome, environment: {
+    PATH: 'safe', USERPROFILE: 'C:/fixture-user', LOCALAPPDATA: 'C:/fixture-user/AppData/Local', OPENAI_API_KEY: 'must-not-forward', OPENAI_BASE_URL: 'https://untrusted.invalid',
     ANTHROPIC_API_KEY: 'must-not-forward', CLAUDE_CODE_OAUTH_TOKEN: 'must-not-forward', CODEX_HOME: 'C:/unsafe/globalhome',
     NODE_OPTIONS: '--require unsafe', NODE_PATH: 'C:/unsafe', HTTP_PROXY: 'http://untrusted.invalid',
   } });
@@ -249,6 +249,58 @@ test('인증·버전·격리 flag·모델 기능 누락이면 Codex 연결과 �
   }
 });
 
+const installedPaths = { ...paths,
+  codexPackage: 'C:/fixture-user/AppData/Roaming/npm/node_modules/@openai/codex',
+  codexNative: 'C:/fixture-user/AppData/Roaming/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe',
+  codexStandalone: 'C:/fixture-user/AppData/Local/Programs/OpenAI/Codex/bin/codex.exe' };
+const generationCall = calls => calls.find(call => call.args.includes('exec') && !call.args.includes('--help'));
+
+test('Codex는 npm vendor 실행부를 먼저 찾고 npm 관리 환경변수는 그 후보에만 둔다', async () => {
+  const npm = fakeCodex({ testPaths: installedPaths });
+  assert.deepEqual(await npm.provider.generate('codex', payload), answer);
+  assert.equal(generationCall(npm.calls).binary, installedPaths.codexNative);
+  for (const call of npm.calls) {
+    assert.equal(call.binary, installedPaths.codexNative);
+    assert.equal(call.options.env.CODEX_MANAGED_BY_NPM, '1');
+    assert.equal(call.options.env.CODEX_MANAGED_PACKAGE_ROOT, installedPaths.codexPackage);
+  }
+  const standalone = fakeCodex({ testPaths: installedPaths, missing: [installedPaths.codexNative] });
+  assert.deepEqual(await standalone.provider.generate('codex', payload), answer);
+  assert.equal(generationCall(standalone.calls).binary, installedPaths.codexStandalone);
+  for (const call of standalone.calls) {
+    assert.equal(call.binary, installedPaths.codexStandalone);
+    assert.equal('CODEX_MANAGED_BY_NPM' in call.options.env, false);
+    assert.equal('CODEX_MANAGED_PACKAGE_ROOT' in call.options.env, false);
+    assert.equal(resolve(call.options.env.CODEX_HOME), resolve(codexHome));
+  }
+  const none = fakeCodex({ testPaths: installedPaths, missing: [installedPaths.codexNative, installedPaths.codexStandalone] });
+  const status = (await none.provider.getProviderStatuses()).find(item => item.id === 'codex');
+  assert.equal(status.status, 'unavailable');
+  assert.match(status.message, /npm install -g @openai\/codex@0\.160\.0/);
+  assert.equal(none.calls.length, 0);
+});
+
+test('Codex 버전은 로그인 확인 전에 검사하고 불일치 시 홈 기준 위치·버전·설치 명령만 안내한다', async () => {
+  const connected = fakeCodex();
+  assert.equal((await connected.provider.getProviderStatuses()).find(item => item.id === 'codex').status, 'connected');
+  const order = connected.calls.map(call => call.args.includes('--version') ? 'version' : call.args.includes('login') ? 'login' : 'other');
+  assert.ok(order.indexOf('version') !== -1 && order.indexOf('version') < order.indexOf('login'));
+  for (const [options, location, detected] of [
+    [{ testPaths: installedPaths, missing: [installedPaths.codexNative] }, '%LOCALAPPDATA%\\Programs\\OpenAI\\Codex\\bin\\codex.exe', '0.159.0'],
+    [{ testPaths: installedPaths }, '~\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\', '0.159.0'],
+    [{ version: 'unexpected private-fixture-output' }, '…\\codex.exe', '확인 불가'],
+  ]) {
+    const { provider, calls } = fakeCodex({ version: 'codex-cli 0.159.0', loggedIn: false, ...options });
+    const status = (await provider.getProviderStatuses()).find(item => item.id === 'codex');
+    assert.equal(status.status, 'setup', '버전 불일치는 로그인 여부보다 먼저 안내한다');
+    assert.equal(calls.some(call => call.args.includes('login')), false, 'login status를 실행하지 않는다');
+    for (const text of [location, `감지 버전: ${detected}`, '필요 버전: 0.160.0', 'npm install -g @openai/codex@0.160.0']) assert.equal(status.message.includes(text), true, text);
+    for (const text of ['fixture-user', 'C:', 'fixed', 'private-fixture']) assert.equal(status.message.includes(text), false, text);
+    await assert.rejects(provider.generate('codex', payload), { code: 'PROVIDER_NOT_CONNECTED' });
+    assert.equal(generationCall(calls), undefined);
+  }
+});
+
 test('Codex 생성은 고정 native argv·stdin·정제 환경과 임시 격리 catalog를 사용한다', async () => {
   const { provider, calls } = fakeCodex({ splitBytes: true });
   assert.deepEqual(await provider.generate('codex', payload), answer);
@@ -266,6 +318,11 @@ test('Codex 생성은 고정 native argv·stdin·정제 환경과 임시 격리 
   for (const name of ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'NODE_OPTIONS', 'NODE_PATH', 'HTTP_PROXY']) assert.equal(generation.options.env[name], undefined, name);
   assert.equal(resolve(generation.options.env.CODEX_HOME), resolve(codexHome));
   assert.notEqual(resolve(generation.options.env.CODEX_HOME), resolve('C:/unsafe/globalhome'));
+  assert.equal(generation.options.env.CODEX_MANAGED_BY_NPM, '1');
+  for (const name of ['CLAUDE_CODE_DISABLE_CLAUDE_MDS', 'DISABLE_ERROR_REPORTING', 'DISABLE_AUTOUPDATER']) assert.equal(generation.options.env[name], undefined, name);
+  const configs = generation.args.filter((value, index) => generation.args[index - 1] === '-c');
+  // Personal ~/.agents/skills listings were model-visible without this (codex debug prompt-input probe).
+  for (const value of ['features.skip_host_skill_discovery=true', 'skills.include_instructions=false', 'project_doc_max_bytes=0']) assert.equal(configs.includes(value), true, value);
   const schemaPath = generation.args[generation.args.indexOf('--output-schema') + 1];
   assert.equal(generation.files.some(file => file.path === schemaPath && JSON.parse(file.text).type === 'object'), true);
   const parsedCatalog = generation.files.map(file => { try { return JSON.parse(file.text); } catch { return null; } }).find(value => Array.isArray(value) || Array.isArray(value?.models));

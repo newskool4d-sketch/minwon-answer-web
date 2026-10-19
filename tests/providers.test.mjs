@@ -3,18 +3,22 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { access } from 'node:fs/promises';
-import { createProviderService, validateProviderOutput, buildClaudeArgs } from '../server/providers.mjs';
+import { readFileSync } from 'node:fs';
+import { createProviderService, validateProviderOutput, buildClaudeArgs, claudeHelpHasFlag } from '../server/providers.mjs';
 
 const answer = { answer: '확인한 운영 기준에 따라 안내드립니다.', summary: '가상 답변', questions: ['운영 기준은 무엇인가요?'], unresolved: [], evidence: [] };
 const payload = { stage: 'draft', input: { field: '일반행정', complaint: '가상 민원: 운영 기준을 알려 주세요.' } };
-const help = buildClaudeArgs('draft').join(' ');
+// Real `claude --help` output of the installed 2.1.301, not text derived from buildClaudeArgs.
+const help = readFileSync(new URL('./fixtures/claude-help-2.1.301.txt', import.meta.url), 'utf8');
+const claudeFlags = ['--safe-mode', '--restricted', '--no-session-persistence', '--tools', '--strict-mcp-config', '--permission-prompts', '--json-schema'];
+const claudeChildEnv = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', DISABLE_ERROR_REPORTING: '1', DISABLE_AUTOUPDATER: '1' };
 const paths = { claude: 'C:/fixed/claude.exe', node: 'C:/fixed/node.exe', codex: 'C:/fixed/codex.js', codexNative: 'C:/fixed/codex.exe' };
 const codexHome = 'C:/fixed/minwon-codex-home';
 const codexHelp = '--ignore-user-config --ignore-rules --strict-config --ephemeral --json --output-schema --color';
 const codexCatalog = [{ slug: 'codex-test', default_reasoning_level: 'medium', supported_reasoning_levels: [{ effort: 'medium', description: 'Test' }] }];
 const key = 'test-key-not-a-real-secret';
 
-function fakeCli({ authMethod = 'claude.ai', generation = { structured_output: answer }, exitCode = 0, hang = false, helpText = help, splitUnicode = false } = {}) {
+function fakeCli({ authMethod = 'claude.ai', generation = { structured_output: answer }, exitCode = 0, hang = false, helpText = help, splitUnicode = false, claudeVersion = '2.1.301 (Claude Code)' } = {}) {
   const calls = [];
   const spawnImpl = (binary, args, options) => {
     const child = new EventEmitter();
@@ -32,7 +36,7 @@ function fakeCli({ authMethod = 'claude.ai', generation = { structured_output: a
       } else if (args.includes('status') && args.includes('login')) {
         child.stderr.end('Logged in using ChatGPT');
       } else if (args.includes('--version')) {
-        child.stdout.end('codex-cli 0.160.0');
+        child.stdout.end(binary === paths.claude ? claudeVersion : 'codex-cli 0.160.0');
       } else if (args.includes('debug') && args.includes('models') && args.includes('--bundled')) {
         child.stdout.end(JSON.stringify(codexCatalog));
       } else if (args.includes('exec') && args.includes('--help')) {
@@ -61,7 +65,7 @@ function fakeCli({ authMethod = 'claude.ai', generation = { structured_output: a
 
 function service(options = {}) {
   const mock = fakeCli(options);
-  return { ...mock, provider: createProviderService({ spawnImpl: mock.spawnImpl, exists: async path => !/(?:^|[\\/])AGENTS(?:\.override)?\.md$/i.test(path), paths, codexHome,
+  return { ...mock, provider: createProviderService({ spawnImpl: mock.spawnImpl, exists: async path => !/(?:^|[\\/])AGENTS(?:\.override)?\.md$/i.test(path), paths, codexHome, claudeVersionPolicy: options.claudeVersionPolicy,
     environment: { PATH: 'safe', USERPROFILE: 'C:/user', ANTHROPIC_API_KEY: 'must-not-forward', OPENAI_API_KEY: 'must-not-forward', CLAUDE_CODE_OAUTH_TOKEN: 'must-not-forward', NODE_OPTIONS: '--require unsafe', CODEX_HOME: 'C:/unsafe/globalhome' } }) };
 }
 
@@ -106,6 +110,61 @@ test('필수 CLI 격리 옵션이 없으면 연결됨을 표시하지 않는다'
   await assert.rejects(provider.generate('claude', payload), { code: 'PROVIDER_NOT_CONNECTED' });
 });
 
+test('Claude 옵션 확인은 실제 2.1.301 help의 옵션 정의 줄만 인정한다', async () => {
+  for (const flag of claudeFlags) assert.equal(claudeHelpHasFlag(help, flag), true, flag);
+  for (const flag of buildClaudeArgs('draft').filter(value => value.startsWith('--'))) assert.equal(claudeHelpHasFlag(help, flag), true, `실제 help에 있는 옵션만 사용: ${flag}`);
+  assert.match(help, /^ {2}-p, --print\b/m);
+  // The definition line is removed but other options' descriptions still mention the flag.
+  const withoutStrict = help.replace(/^ {2}--strict-mcp-config\b.*$/m, '');
+  assert.equal(withoutStrict.includes('--strict-mcp-config'), true);
+  assert.equal(claudeHelpHasFlag(withoutStrict, '--strict-mcp-config'), false);
+  assert.equal(claudeHelpHasFlag(help.replace(/^ {2}--system-prompt <.*$/m, ''), '--system-prompt'), false, '--system-prompt-snapshot는 다른 옵션이다');
+  // Description continuation lines are indented 6+ spaces; a flag mentioned there must not count as defined.
+  assert.equal(claudeHelpHasFlag(`${withoutStrict}\n      --strict-mcp-config continues a description\n`, '--strict-mcp-config'), false);
+  const { provider, calls } = service({ helpText: withoutStrict });
+  assert.equal((await provider.getProviderStatuses()).find(item => item.id === 'claude').status, 'setup');
+  await assert.rejects(provider.generate('claude', payload), { code: 'PROVIDER_NOT_CONNECTED' });
+  assert.equal(calls.some(call => call.args.includes('-p')), false);
+});
+
+test('Claude argv는 고정 순서의 격리 옵션 뒤에 시스템 지침과 스키마를 둔다', () => {
+  for (const stage of ['draft', 'review']) {
+    const args = buildClaudeArgs(stage);
+    assert.deepEqual(args.slice(0, 21), ['--safe-mode', '--restricted', '-p', '--output-format', 'json',
+      '--no-session-persistence', '--disable-slash-commands', '--no-chrome',
+      '--tools', '', '--disallowedTools', 'mcp__*', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+      '--settings', '{"disableAllHooks":true}', '--permission-mode', 'dontAsk', '--permission-prompts', 'none']);
+    assert.equal(args.length, 25);
+    assert.equal(args[21], '--system-prompt');
+    assert.match(args[22], /민원 답변/);
+    assert.equal(args[23], '--json-schema');
+    assert.deepEqual(JSON.parse(args[24]).required, stage === 'review' ? ['findings', 'mapping', 'summary'] : ['answer', 'summary', 'questions', 'unresolved', 'evidence']);
+  }
+});
+
+test('Claude 버전은 최소 기능 버전 미만이면 setup, 검증 목록 밖이면 정책에 따라 경고 또는 제한한다', async () => {
+  for (const claudeVersion of ['2.1.258 (Claude Code)', '1.9.999 (Claude Code)', 'unexpected-private-output']) {
+    const { provider, calls } = service({ claudeVersion });
+    const status = (await provider.getProviderStatuses()).find(item => item.id === 'claude');
+    assert.equal(status.status, 'setup', claudeVersion);
+    assert.match(status.message, /2\.1\.259/);
+    assert.equal(status.message.includes('unexpected-private-output'), false);
+    await assert.rejects(provider.generate('claude', payload), { code: 'PROVIDER_NOT_CONNECTED' });
+    assert.equal(calls.some(call => call.args.includes('-p')), false);
+  }
+  const warned = (await service({ claudeVersion: '2.1.400 (Claude Code)' }).provider.getProviderStatuses()).find(item => item.id === 'claude');
+  assert.equal(warned.status, 'connected');
+  assert.match(warned.message, /검증 버전과 다름.*2\.1\.400.*2\.1\.301/);
+  const strict = service({ claudeVersion: '2.1.400 (Claude Code)', claudeVersionPolicy: 'strict' });
+  const limited = (await strict.provider.getProviderStatuses()).find(item => item.id === 'claude');
+  assert.equal(limited.status, 'setup');
+  assert.match(limited.message, /검증 버전과 다릅니다.*2\.1\.400.*2\.1\.301/);
+  await assert.rejects(strict.provider.generate('claude', payload), { code: 'PROVIDER_NOT_CONNECTED' });
+  const verified = (await service({ claudeVersionPolicy: 'strict' }).provider.getProviderStatuses()).find(item => item.id === 'claude');
+  assert.equal(verified.status, 'connected');
+  assert.doesNotMatch(verified.message, /검증 버전과 다름/);
+});
+
 test('로그인 버튼은 공식 사용자 단말 절차만 안내하며 프로세스를 자동 실행하지 않는다', async () => {
   const { provider, calls } = service();
   assert.match((await provider.startLogin('claude')).message, /claude auth login/);
@@ -129,6 +188,8 @@ test('Claude는 stdin·고정 argv·비영속·빈 도구·정제 환경을 사�
   assert.equal(generation.args.some(value => value.includes('$(비밀)')), false);
   assert.match(generation.input, /\$\(비밀\)/);
   for (const name of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'NODE_OPTIONS']) assert.equal(generation.options.env[name], undefined);
+  for (const call of calls.filter(item => item.binary === paths.claude)) for (const [name, value] of Object.entries(claudeChildEnv)) assert.equal(call.options.env[name], value, name);
+  for (const name of ['DISABLE_TELEMETRY', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CODEX_HOME']) assert.equal(generation.options.env[name], undefined, name);
   await assert.rejects(access(generation.options.cwd), { code: 'ENOENT' });
 });
 

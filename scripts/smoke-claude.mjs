@@ -3,6 +3,7 @@ import { generate, getProviderStatuses } from '../server/providers.mjs';
 import { readdir, stat, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+if(!process.argv.includes('--live-fictional')){console.error('실제 구독 호출 검증: node scripts/smoke-claude.mjs --live-fictional');process.exit(2);}
 const marker='MINWON_MVP_FICTIONAL_SMOKE_20261019';
 const roots=[join(homedir(),'.claude','projects'),join(homedir(),'.claude','debug')];
 const startedAt=Date.now();

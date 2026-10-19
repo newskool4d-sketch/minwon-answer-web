@@ -11,6 +11,14 @@ const PROBE_TIMEOUT = 12_000;
 const FETCH_TIMEOUT = 60_000;
 const DEFAULT_MODEL = Object.freeze([{ id: 'default', label: '로그인한 CLI의 기본 모델' }]);
 const CODEX_VERSION = '0.160.0'; // Re-verify capability semantics before accepting another CLI version.
+const CODEX_INSTALL = `npm install -g @openai/codex@${CODEX_VERSION}`;
+// 'warn': connect with a notice when the version is not verified. 'strict': limit to setup until verified.
+const CLAUDE_VERSION_POLICY = 'warn';
+const VERIFIED_CLAUDE_VERSIONS = Object.freeze(['2.1.301']);
+const CLAUDE_MIN_VERSION = '2.1.259'; // --permission-prompts needs 2.1.259; --restricted needs 2.1.248.
+const CLAUDE_FLAGS = Object.freeze(['--safe-mode', '--restricted', '--no-session-persistence', '--tools', '--strict-mcp-config', '--permission-prompts', '--json-schema']);
+// Second layer for the Claude child only; each name was confirmed in the installed 2.1.301 binary.
+const CLAUDE_CHILD_ENV = Object.freeze({ CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', DISABLE_ERROR_REPORTING: '1', DISABLE_AUTOUPDATER: '1' });
 export const CODEX_HOME = join(homedir(), 'AppData', 'Local', 'minwon-answer', 'codex-home');
 const CODEX_PATCH = Object.freeze({
   shell_type: 'disabled', apply_patch_tool_type: null, experimental_supported_tools: [],
@@ -198,6 +206,26 @@ function safeEnvironment(env = process.env) {
   return result;
 }
 
+// Status messages reach paired web origins: never include the raw user folder name.
+function homeRelative(path, env = process.env) {
+  const normal = value => String(value ?? '').replaceAll('/', '\\').replace(/\\+$/, '');
+  const target = normal(path);
+  for (const [base, label] of [[env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), '%LOCALAPPDATA%'], [env.USERPROFILE ?? homedir(), '~']]) {
+    const prefix = normal(base);
+    if (prefix && target.toLowerCase().startsWith(`${prefix.toLowerCase()}\\`)) return label + target.slice(prefix.length);
+  }
+  return `…\\${target.split('\\').at(-1)}`;
+}
+
+const versionOf = (text, pattern) => pattern.exec(String(text).trim())?.[1] ?? '';
+const olderThan = (version, minimum) => {
+  const [a, b] = [version, minimum].map(value => value.split('.').map(Number));
+  for (let index = 0; index < 3; index += 1) if (a[index] !== b[index]) return a[index] < b[index];
+  return false;
+};
+// Only an option definition line counts; deep-indented description lines that mention a flag do not.
+export const claudeHelpHasFlag = (help, flag) => new RegExp(`^[ \\t]{2,4}(?:-\\w,[ \\t]+)?${flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'm').test(help);
+
 export function buildClaudeArgs(stage) {
   return ['--safe-mode', '--restricted', '-p', '--output-format', 'json',
     '--no-session-persistence', '--disable-slash-commands', '--no-chrome',
@@ -212,7 +240,7 @@ function codexConfig(root) {
     'approval_policy="never"', 'sandbox_mode="read-only"', 'web_search="disabled"',
     'features.shell_tool=false', 'features.view_image=false', 'features.hooks=false', 'features.apps=false',
     'features.plugins=false', 'features.remote_plugin=false', 'features.multi_agent=false',
-    'features.skip_host_skill_discovery=true', 'features.code_mode.enabled=false',
+    'features.skip_host_skill_discovery=true', 'features.code_mode.enabled=false', 'skills.include_instructions=false',
     'mcp_servers={}', 'apps._default.enabled=false', 'project_doc_max_bytes=0',
     'memories.use_memories=false', 'memories.generate_memories=false',
     'history.persistence="none"', 'analytics.enabled=false', 'feedback.enabled=false',
@@ -244,16 +272,19 @@ export function createProviderService({
     codex: join(homedir(), 'AppData', 'Roaming', 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
     codexNative: join(homedir(), 'AppData', 'Roaming', 'npm', 'node_modules', '@openai', 'codex', 'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe'),
     codexPackage: join(homedir(), 'AppData', 'Roaming', 'npm', 'node_modules', '@openai', 'codex'),
+    // Official standalone installer (chatgpt.com/codex/install.ps1) default bin, a junction to its current release.
+    codexStandalone: join(homedir(), 'AppData', 'Local', 'Programs', 'OpenAI', 'Codex', 'bin', 'codex.exe'),
     node: process.execPath,
   },
   environment = process.env,
   temporaryRoot = tmpdir(),
   codexHome = CODEX_HOME,
+  claudeVersionPolicy = CLAUDE_VERSION_POLICY,
   onCodexDiagnostic = () => {},
 } = {}) {
   const env = safeEnvironment(environment);
 
-  function run(binary, args, { signal, timeout = PROBE_TIMEOUT, input = '', captureStderr = false, cwd = temporaryRoot, onStdout, codex = false } = {}) {
+  function run(binary, args, { signal, timeout = PROBE_TIMEOUT, input = '', captureStderr = false, cwd = temporaryRoot, onStdout, codex = false, npm = false } = {}) {
     const combined = combineSignal(signal, timeout);
     if (combined.aborted) return Promise.reject(aborted(combined));
     return new Promise((resolveRun, rejectRun) => {
@@ -272,7 +303,8 @@ export function createProviderService({
       const stop = error => { pendingError ??= error; child?.kill(); };
       const onAbort = () => stop(aborted(combined));
       try {
-        const childEnv = codex ? { ...env, CODEX_HOME: codexHome, CODEX_MANAGED_BY_NPM: '1', ...(paths.codexPackage ? { CODEX_MANAGED_PACKAGE_ROOT: paths.codexPackage } : {}), RUST_LOG: 'off' } : env;
+        const managed = npm ? { CODEX_MANAGED_BY_NPM: '1', ...(paths.codexPackage ? { CODEX_MANAGED_PACKAGE_ROOT: paths.codexPackage } : {}) } : {};
+        const childEnv = codex ? { ...env, CODEX_HOME: codexHome, ...managed, RUST_LOG: 'off' } : { ...env, ...CLAUDE_CHILD_ENV };
         child = spawnImpl(binary, args, { cwd, env: childEnv, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       } catch { finish(fail('CLI_UNAVAILABLE', '공식 CLI를 실행할 수 없습니다. 설치·실행 경로를 확인해 주세요.', 503)); return; }
       combined.addEventListener('abort', onAbort, { once: true });
@@ -305,17 +337,29 @@ export function createProviderService({
     const base = { id: 'claude', name: 'Claude', models: [...DEFAULT_MODEL], canLogin: true };
     if (!(await exists(paths.claude))) return { ...base, status: 'unavailable', models: [], canLogin: false, message: '공식 Claude Code가 설치되어 있지 않습니다. 자동 설치하지 않습니다.' };
     try {
-      const [auth, help] = await Promise.all([run(paths.claude, ['auth', 'status']), run(paths.claude, ['--help'])]);
+      const [auth, help, version] = await Promise.all([run(paths.claude, ['auth', 'status']), run(paths.claude, ['--help']), run(paths.claude, ['--version'])]);
+      const detected = version.code === 0 ? versionOf(version.stdout, /^(\d+\.\d+\.\d+)(?:\s|$)/) : '';
+      const verified = VERIFIED_CLAUDE_VERSIONS.includes(detected);
+      const versions = `감지 ${detected || '확인 불가'} · 검증 ${VERIFIED_CLAUDE_VERSIONS.join(', ')}`;
+      if (!detected) {
+        return { ...base, status: 'setup', message: `Claude Code 버전을 확인하지 못했습니다(${versions}). ${CLAUDE_MIN_VERSION} 이상의 공식 설치본인지 확인해 주세요. 자동 생성을 제한합니다.` };
+      }
+      if (olderThan(detected, CLAUDE_MIN_VERSION)) {
+        return { ...base, status: 'setup', message: `Claude Code ${CLAUDE_MIN_VERSION} 이상이 필요합니다(${versions}). 자동 업데이트하지 않습니다.` };
+      }
+      if (!verified && claudeVersionPolicy !== 'warn') {
+        return { ...base, status: 'setup', message: `Claude Code가 검증 버전과 다릅니다(${versions}). 검증 전까지 자동 생성을 제한합니다.` };
+      }
       const data = parseJson(auth.stdout);
       // OAuth token env credentials are deliberately not accepted as a Claude account login.
       if (auth.code !== 0 || data.loggedIn !== true || data.authMethod !== 'claude.ai') {
         return { ...base, status: 'disconnected', message: '본인 Claude 구독 로그인이 필요합니다. API Key·공유 토큰 인증은 사용하지 않습니다.' };
       }
-      const required = ['--safe-mode', '--restricted', '--no-session-persistence', '--tools', '--strict-mcp-config', '--permission-prompts', '--json-schema'];
-      if (help.code !== 0 || required.some(flag => !help.stdout.includes(flag))) {
+      if (help.code !== 0 || CLAUDE_FLAGS.some(flag => !claudeHelpHasFlag(help.stdout, flag))) {
         return { ...base, status: 'setup', message: '구독 로그인은 확인했으나 필요한 공식 격리 옵션을 확인하지 못했습니다. 자동 생성을 제한합니다.' };
       }
-      return { ...base, status: 'connected', message: '공식 Claude 구독 로그인 확인. 가상 사례 실호출·비보관 검증은 별도입니다.' };
+      const notice = verified ? '' : ` 검증 버전과 다름(${versions}).`;
+      return { ...base, status: 'connected', message: `공식 Claude 구독 로그인 확인.${notice} 가상 사례 실호출·비보관 검증은 별도입니다.` };
     } catch { return { ...base, status: 'setup', message: 'Claude 공식 인증 상태를 확인하지 못했습니다. 터미널에서 상태를 확인해 주세요.' }; }
   }
 
@@ -326,25 +370,35 @@ export function createProviderService({
 
   async function codexReady() {
     const base = { id: 'codex', name: 'Codex', models: [], canLogin: true };
-    if (!paths.codexNative || !(await exists(paths.codexNative))) return { status: { ...base, status: 'unavailable', canLogin: false, message: '검증된 공식 Codex 네이티브 CLI를 찾지 못했습니다. 자동 설치하지 않습니다.' } };
+    // npm vendor binary first, then the official standalone install. Only the npm one is npm-managed.
+    let cli;
+    for (const candidate of [{ path: paths.codexNative, npm: true }, { path: paths.codexStandalone, npm: false }]) {
+      if (candidate.path && await exists(candidate.path)) { cli = candidate; break; }
+    }
+    if (!cli) return { status: { ...base, status: 'unavailable', canLogin: false, message: `검증된 공식 Codex 네이티브 CLI를 찾지 못했습니다. 자동 설치하지 않습니다. 설치 명령: ${CODEX_INSTALL}` } };
     if (await exists(join(codexHome, 'AGENTS.md')) || await exists(join(codexHome, 'AGENTS.override.md'))) {
       return { status: { ...base, status: 'setup', message: '앱 전용 Codex 폴더에 사용자 지침 파일이 있습니다. 지침 격리를 확인하기 전까지 생성을 제한합니다.' } };
     }
+    const options = { codex: true, npm: cli.npm };
     try {
-      const auth = await run(paths.codexNative, ['login', 'status'], { captureStderr: true, codex: true });
+      const version = await run(cli.path, ['--version'], options);
+      if (version.code !== 0 || version.stdout.trim() !== `codex-cli ${CODEX_VERSION}`) {
+        const detected = version.code === 0 ? versionOf(version.stdout, /^codex-cli\s+(\d+\.\d+\.\d+[0-9A-Za-z.+-]{0,30})$/) : '';
+        return { status: { ...base, status: 'setup', message: `Codex 버전이 검증 버전과 다릅니다. 감지 위치: ${homeRelative(cli.path, environment)} · 감지 버전: ${detected || '확인 불가'} · 필요 버전: ${CODEX_VERSION}. 설치 명령: ${CODEX_INSTALL}` } };
+      }
+      const auth = await run(cli.path, ['login', 'status'], { ...options, captureStderr: true });
       const loggedIn = auth.code === 0 && /logged in using chatgpt/i.test(`${auth.stdout}\n${auth.stderr}`);
       if (!loggedIn) return { status: { ...base, status: 'disconnected', message: '개인 지침을 분리한 앱 전용 Codex에 최초 1회 ChatGPT 로그인이 필요합니다. ChatGPT로 로그인 안내를 열어 주세요. API Key는 필요하지 않습니다.' } };
-      const [version, help, bundled] = await Promise.all([
-        run(paths.codexNative, ['--version'], { codex: true }),
-        run(paths.codexNative, ['exec', '--help'], { codex: true }),
-        run(paths.codexNative, ['debug', 'models', '--bundled'], { codex: true }),
+      const [help, bundled] = await Promise.all([
+        run(cli.path, ['exec', '--help'], options),
+        run(cli.path, ['debug', 'models', '--bundled'], options),
       ]);
       const required = ['--strict-config', '--ignore-user-config', '--ignore-rules', '--ephemeral', '--output-schema', '--json'];
-      if (version.code !== 0 || version.stdout.trim() !== `codex-cli ${CODEX_VERSION}` || help.code !== 0 || required.some(flag => !help.stdout.includes(flag)) || bundled.code !== 0) {
-        return { status: { ...base, status: 'setup', message: `ChatGPT 로그인 확인. Codex ${CODEX_VERSION}의 검증된 격리 실행 기능이 필요합니다. CLI 버전·옵션을 확인해 주세요.` } };
+      if (help.code !== 0 || required.some(flag => !help.stdout.includes(flag)) || bundled.code !== 0) {
+        return { status: { ...base, status: 'setup', message: `ChatGPT 로그인 확인. Codex ${CODEX_VERSION}의 검증된 격리 실행 기능이 필요합니다. CLI 옵션을 확인해 주세요.` } };
       }
       const catalog = buildCodexCatalog(parseJson(bundled.stdout));
-      return { catalog, status: { ...base, status: 'connected', models: [{ id: 'default', label: 'Codex CLI 기본 모델 · 도구 제한 실행' }], message: '앱 전용 ChatGPT 로그인 확인. 개인 지침·설정·도구를 분리한 임시 실행으로 초안·검토·재작성이 가능합니다.' } };
+      return { catalog, cli, status: { ...base, status: 'connected', models: [{ id: 'default', label: 'Codex CLI 기본 모델 · 도구 제한 실행' }], message: '앱 전용 ChatGPT 로그인 확인. 개인 지침·설정·도구를 분리한 임시 실행으로 초안·검토·재작성이 가능합니다.' } };
     } catch { return { status: { ...base, status: 'setup', message: 'Codex 공식 인증·격리 기능을 확인하지 못했습니다. 터미널에서 상태를 확인해 주세요.' } }; }
   }
 
@@ -434,7 +488,7 @@ export function createProviderService({
     const { schema, prompt } = buildPrompt(payload);
     if (signal?.aborted) throw aborted(signal);
     if (providerId === 'codex') {
-      const { status, catalog } = await codexReady();
+      const { status, catalog, cli } = await codexReady();
       if (status.status !== 'connected') throw fail('PROVIDER_NOT_CONNECTED', status.message, 409);
       if (payload.model && payload.model !== 'default') throw fail('MODEL_UNAVAILABLE', 'Codex의 검증된 기본 모델 실행을 선택해 주세요.', 400);
       const root = await mkdtemp(join(resolve(temporaryRoot), 'minwon-codex-'));
@@ -451,7 +505,7 @@ export function createProviderService({
         const args = ['exec', '--strict-config', '--ignore-user-config', '--ignore-rules', '--ephemeral',
           '--skip-git-repo-check', '--json', '--color', 'never', '--output-schema', join(root, 'schema.json'),
           ...codexConfig(root), '-'];
-        const result = await run(paths.codexNative, args, { codex: true, signal, timeout: CLI_TIMEOUT, cwd, input: prompt, onStdout: chunk => reader.push(chunk) });
+        const result = await run(cli.path, args, { codex: true, npm: cli.npm, signal, timeout: CLI_TIMEOUT, cwd, input: prompt, onStdout: chunk => reader.push(chunk) });
         if (result.code !== 0) throw fail('PROVIDER_REQUEST_FAILED', 'Codex 실행에 실패했습니다. 인증·사용량·CLI 격리 옵션을 확인해 주세요.');
         const { output, diagnostic } = reader.finish();
         const validated = validateProviderOutput(payload.stage, output, { answer: payload.answer });

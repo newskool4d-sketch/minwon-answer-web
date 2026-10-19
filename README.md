@@ -33,7 +33,7 @@ node server/index.mjs
 ```
 
 1. 로컬 화면 `http://127.0.0.1:8793`을 엽니다.
-2. Codex 최초 연결은 `codex-login.ps1`을 실행하고 공식 ChatGPT 로그인을 완료합니다. 앱 전용 Codex 홈을 사용하며 기존 인증정보를 복사하지 않습니다. Claude는 공식 Claude Code의 본인 구독 로그인을 사용합니다.
+2. Codex 최초 연결은 `codex-login.ps1`을 실행하고 공식 ChatGPT 로그인을 완료합니다. 앱 전용 Codex 홈을 사용하며 기존 인증정보를 복사하지 않습니다. Claude는 공식 Claude Code의 본인 구독 로그인을 사용합니다. Claude Code는 2.1.259 이상이 필요하며 검증 버전은 2.1.301입니다(목록 밖 버전은 경고와 함께 연결).
 3. Vercel 웹 화면에서 표시하는 웹 origin을 복사합니다.
 4. 로컬 화면의 **웹 연결 관리**에서 해당 origin과 연결 권한을 확인하고 일회용 코드를 발급합니다.
 5. Vercel 웹 화면에 연결 코드를 입력합니다. 브라우저가 이 기기/로컬 네트워크 접근 권한을 요청하면 대상 웹 주소를 확인한 뒤 직접 허용합니다.
@@ -55,6 +55,10 @@ node server/index.mjs
 
 공식 네이티브 Codex CLI 0.160.0의 검증된 기능을 사용합니다. 다른 버전은 호환·격리 검증 전 `setup` 상태로 제한합니다. 별도 패키지를 자동 설치하거나 모델을 임의로 대체하지 않습니다.
 
+- 사전 준비: 사용자가 직접 `npm install -g @openai/codex@0.160.0`을 실행합니다. 앱은 npm 설치의 네이티브 실행 파일을 먼저 찾고, 없으면 공식 독립 설치 프로그램의 기본 위치 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe`를 사용합니다.
+- 어느 위치든 `codex --version`이 정확히 `codex-cli 0.160.0`이어야 합니다. 다르면 로그인 확인 전에 감지 위치(홈 기준 표기)·감지 버전·필요 버전·설치 명령을 안내하고 `setup`으로 제한합니다. npm 설치가 있으면 그 설치가 우선 적용되므로, npm 설치가 0.160.0이 아니면 독립 설치가 있어도 `setup`이 됩니다.
+- Codex 데스크톱 앱이 관리하는 `%LOCALAPPDATA%\OpenAI\Codex\bin\...` 실행 파일은 사용하지 않습니다.
+
 앱 전용 홈은 `%LOCALAPPDATA%\minwon-answer\codex-home`입니다. 해당 홈의 개인 지침 파일을 발견하면 생성을 차단합니다. 셸·패치·검색·REPL·이미지 기능과 개인 설정을 제한하고 실행별 임시 자료를 정리합니다. 이는 OS 전체 읽기 접근 차단을 뜻하지 않습니다.
 
 기존 로컬/오픈소스 CLI 인증과 상용 호스팅용 SIWC는 구분합니다. 이 앱은 개인 PC에서 실행하며 Vercel이 로그인·모델 호출을 대행하지 않습니다. [공식 인증 경계](https://learn.chatgpt.com/docs/app-server#auth-endpoints).
@@ -68,6 +72,6 @@ node scripts/build-web.mjs
 
 Vercel에는 `dist`의 화면 파일 3개만 배포합니다. `vercel.json`에 빌드 명령·출력 경로·보안 헤더가 지정되어 있습니다. 인증 파일·로컬 작업 기록·실호출 보고서는 Git에 포함하지 않습니다.
 
-`scripts/smoke-codex.mjs --live-fictional`은 실제 외부 전송과 구독 사용량을 발생시키므로 사용자의 명시적인 가상 실호출 요청이 있을 때만 실행합니다.
+`scripts/smoke-codex.mjs --live-fictional`과 `scripts/smoke-claude.mjs --live-fictional`은 실제 외부 전송과 구독 사용량을 발생시키므로 사용자의 명시적인 가상 실호출 요청이 있을 때만 실행합니다. 두 스크립트 모두 `--live-fictional` 없이 실행하면 호출 없이 종료 코드 2로 끝납니다.
 
 연결 API와 검증 경계는 [배포 안내](docs/DEPLOYMENT.md)를 참고하세요.
