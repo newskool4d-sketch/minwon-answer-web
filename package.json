@@ -1,6 +1,6 @@
 {
   "name": "minwon-answer-web",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "로컬 AI 로그인 연결을 지원하는 민원답변 웹 앱",
@@ -9,6 +9,6 @@
     "start": "node server/index.mjs",
     "build:win": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-exe.ps1",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check server/index.mjs && node --check server/domain.mjs && node --check server/providers.mjs && node --check public/app.js"
+    "check": "node --check server/index.mjs && node --check server/domain.mjs && node --check server/providers.mjs && node --check public/app.js && node --check public/work-file.js"
   }
 }

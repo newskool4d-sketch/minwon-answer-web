@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { WORK_FORMAT, WORK_FORMAT_VERSION, WORK_MAX_VERSIONS } from '../public/work-file.js';
 
 export const fields = [
   ['general','일반행정·교육정책','정책 적용 대상과 담당 기관, 기존 안내를 확인합니다.',['적용 대상','담당 기관','안내 이력']],
@@ -143,13 +144,15 @@ export function staticFindings(state,version){
   if(/이전\s*(?:지시|명령).*무시|시스템\s*프롬프트|토큰.*출력|ignore\s+(?:all\s+)?previous/i.test(text))out.push(finding('외부 입력','AI 대상 지시문이 답변에 포함되어 있습니다.','해당 문구를 제거하고 민원 질문에만 답변해 주세요.'));
   out.push(...directionIssues(state.case.direction,text),...citationIssues(version));return out;
 }
+// 질문별 대응은 답변 본문에 실제로 들어 있는 문단만 인정합니다(검토와 작업 불러오기에 같은 규칙).
+const normalQuestion=s=>s.replace(/[\s?？.!]/g,'');
+function questionMapping(questions,answer,incoming){return questions.map(question=>{const item=incoming.find(m=>normalQuestion(m.question)===normalQuestion(question));const quoted=Boolean(item?.paragraph.trim()&&answer.includes(item.paragraph.trim()));return {question,answered:Boolean(item?.answered&&quoted),paragraph:quoted?item.paragraph:''};});}
 export function applyReview(state,result,source){
   const version=current(state);if(!version)fail('DRAFT_REQUIRED','초안을 먼저 생성해 주세요.');
   if(!result||!Array.isArray(result.findings)||!Array.isArray(result.mapping))fail('INVALID_REVIEW','검토 응답의 형식이 올바르지 않습니다.',502);
   const questions=questionList(state).length?questionList(state):version.questions;
   const incoming=result.mapping.filter(m=>m&&typeof m.question==='string'&&typeof m.answered==='boolean'&&typeof m.paragraph==='string');
-  const normal=s=>s.replace(/[\s?？.!]/g,'');
-  const mapping=questions.map(question=>{const item=incoming.find(m=>normal(m.question)===normal(question));const quoted=Boolean(item?.paragraph.trim()&&version.answer.includes(item.paragraph.trim()));return {question,answered:Boolean(item?.answered&&quoted),paragraph:quoted?item.paragraph:''};});
+  const mapping=questionMapping(questions,version.answer,incoming);
   const ai=result.findings.slice(0,80).map(f=>({id:randomUUID(),severity:f.severity==='blocker'?'blocker':'advice',category:String(f.category||'검토'),paragraph:String(f.paragraph||'답변 전체'),reason:String(f.reason||''),suggestion:String(f.suggestion||'')}));
   const findings=[...ai,...staticFindings(state,version)];
   if(!mapping.length)findings.push(finding('질문 대조',noQuestions,'민원 입력의 ‘요구사항과 질문’에 질문을 한 줄에 하나씩 입력하고 저장한 뒤 재검토해 주세요.'));
@@ -168,6 +171,53 @@ export function gate(state,version=current(state)){
   return {canConfirm:reasons.length===0,reasons:[...new Set(reasons)]};
 }
 export function exportState(state){const out=clone(state);for(const v of out.versions){v.reviewValid=reviewValid(state,v);v.gate=gate(state,v);}return out;}
+// 작업 파일 불러오기: 파일 내용을 그대로 복사하지 않고 허용한 항목만 새로 만들어 검증합니다(하나라도 틀리면 전체 거부).
+// 확정 여부는 항상 해제하고, 수기 확인 근거는 추가할 때와 같은 기준으로 다시 검증합니다.
+const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const hexPattern=/^[0-9a-f]{64}$/;
+const versionSources=['demo','claude','codex','gemini','manual','restored'];
+const reviewSources=['demo','claude','codex','gemini'];
+// 앱이 저장할 수 있는 길이(AI 응답 문자열 최대 180,000자)보다 좁게 막지 않습니다. 답변 본문은 appendVersion과 같은 60,000자입니다.
+const importTextMax=200000;
+export function importWork(work){
+  const bad=detail=>fail('INVALID_WORK_FILE',`작업 파일 형식이 올바르지 않습니다: ${detail}`);
+  const isObject=v=>Boolean(v)&&typeof v==='object'&&!Array.isArray(v);
+  const text=(v,max,label,{required=false}={})=>{if(typeof v!=='string'||v.length>max||(required&&!v.trim()))bad(label);return v;};
+  const list=(v,max,label)=>{if(!Array.isArray(v)||v.length>max)bad(label);return v;};
+  const time=(v,label)=>{text(v,40,label,{required:true});if(Number.isNaN(Date.parse(v)))bad(label);return v;};
+  if(!isObject(work)||work.format!==WORK_FORMAT)bad('민원답변 도우미 작업 파일이 아닙니다.');
+  if(work.formatVersion!==WORK_FORMAT_VERSION)fail('UNSUPPORTED_WORK_FILE','지원하지 않는 작업 파일 버전입니다. 앱을 최신 버전으로 바꿔 다시 불러와 주세요.');
+  if(!['fictional','public','internal'].includes(work.classification))bad('자료 구분');
+  const nextCase=validateCase(work.case);
+  const ids=new Set();
+  const versions=list(work.versions,WORK_MAX_VERSIONS,'답변 버전 목록').map((v,index)=>{
+    const label=`v${index+1}`;if(!isObject(v))bad(label);
+    if(typeof v.id!=='string'||!uuidPattern.test(v.id)||ids.has(v.id))bad(`${label} 식별자`);ids.add(v.id);
+    if(typeof v.caseHash!=='string'||!hexPattern.test(v.caseHash))bad(`${label} 입력 확인값`);
+    if(!versionSources.includes(v.source))bad(`${label} 작성 출처`);
+    const evidence=list(v.evidence,500,`${label} 근거 목록`).map((e,i)=>{
+      if(!isObject(e))bad(`${label} 근거 ${i+1}`);
+      if(e.status==='manual')return validateEvidence({title:e.title,url:e.url,effectiveDate:e.effectiveDate,checkedAt:e.checkedAt,checkedBy:e.checkedBy,quote:e.quote});
+      if(e.status!=='unverified')bad(`${label} 근거 ${i+1} 상태`);
+      return {id:randomUUID(),title:text(e.title,importTextMax,`${label} 근거 ${i+1}`),article:text(e.article,importTextMax,`${label} 근거 ${i+1}`),url:text(e.url,importTextMax,`${label} 근거 ${i+1}`),quote:text(e.quote,importTextMax,`${label} 근거 ${i+1}`),effectiveDate:text(e.effectiveDate,importTextMax,`${label} 근거 ${i+1}`),status:'unverified'};
+    });
+    let review=null;
+    if(v.review!==null&&v.review!==undefined){
+      const r=v.review;if(!isObject(r))bad(`${label} 검토 결과`);
+      if(typeof r.id!=='string'||!uuidPattern.test(r.id)||typeof r.answerHash!=='string'||!hexPattern.test(r.answerHash)||typeof r.caseHash!=='string'||!hexPattern.test(r.caseHash)||!reviewSources.includes(r.source))bad(`${label} 검토 결과`);
+      const findings=list(r.findings,500,`${label} 검토 의견`).map((f,i)=>{if(!isObject(f)||typeof f.id!=='string'||!uuidPattern.test(f.id)||!['blocker','advice'].includes(f.severity))bad(`${label} 검토 의견 ${i+1}`);return {id:f.id,severity:f.severity,category:text(f.category,importTextMax,`${label} 검토 의견 ${i+1}`),paragraph:text(f.paragraph,importTextMax,`${label} 검토 의견 ${i+1}`),reason:text(f.reason,importTextMax,`${label} 검토 의견 ${i+1}`),suggestion:text(f.suggestion,importTextMax,`${label} 검토 의견 ${i+1}`)};});
+      const mapping=list(r.mapping,500,`${label} 질문 대조`).map((m,i)=>{if(!isObject(m)||typeof m.answered!=='boolean')bad(`${label} 질문 대조 ${i+1}`);return {question:text(m.question,importTextMax,`${label} 질문 대조 ${i+1}`),answered:m.answered,paragraph:text(m.paragraph,importTextMax,`${label} 질문 대조 ${i+1}`)};});
+      // 다른 버전의 검토 결과는 이 버전에 붙이지 않습니다.
+      const caseQuestions=questionList({case:nextCase});const answer=typeof v.answer==='string'?v.answer:'';
+      if(r.versionId===v.id)review={id:r.id,versionId:v.id,answerHash:r.answerHash,caseHash:r.caseHash,findings,mapping:questionMapping(caseQuestions.length?caseQuestions:(Array.isArray(v.questions)?v.questions.filter(q=>typeof q==='string'):[]),answer,mapping),summary:text(r.summary,importTextMax,`${label} 검토 요약`),source:r.source,createdAt:time(r.createdAt,`${label} 검토 시각`)};
+    }
+    return {id:v.id,number:index+1,answer:text(v.answer,60000,`${label} 답변`,{required:true}),summary:text(v.summary,importTextMax,`${label} 요약`),questions:list(v.questions,500,`${label} 질문`).map((q,i)=>text(q,importTextMax,`${label} 질문 ${i+1}`)),unresolved:list(v.unresolved,500,`${label} 미해소 확인사항`).map((u,i)=>text(u,importTextMax,`${label} 미해소 확인사항 ${i+1}`)),createdAt:time(v.createdAt,`${label} 작성 시각`),source:v.source,parentId:v.parentId,caseHash:v.caseHash,review,checks:Object.fromEntries(checkKeys.map(k=>[k,v.checks?.[k]===true])),evidence,confirmed:false};
+  });
+  for(const v of versions){if(v.parentId!==null&&(typeof v.parentId!=='string'||v.parentId===v.id||!ids.has(v.parentId)))bad(`v${v.number} 이전 버전 연결`);}
+  const currentVersionId=work.currentVersionId??null;
+  if(versions.length?!ids.has(currentVersionId):currentVersionId!==null)bad('현재 버전');
+  return {case:nextCase,classification:work.classification,versions,currentVersionId};
+}
 export function validateEvidence(body){
   const keys=['title','url','effectiveDate','checkedAt','checkedBy','quote'];const record={};for(const key of keys){if(typeof body[key]!=='string'||!body[key].trim()||body[key].length>10000)fail('EVIDENCE_REQUIRED','근거명·공식 URL·시행일·확인일·확인 주체·원문을 모두 입력해 주세요.');record[key]=body[key].trim();}
   let url;try{url=new URL(record.url);}catch{fail('INVALID_EVIDENCE_URL','공식 출처의 HTTPS URL을 입력해 주세요.');}

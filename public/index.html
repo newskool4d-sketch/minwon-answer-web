@@ -24,7 +24,7 @@
       <button id="load-example" type="button" class="button secondary" disabled>가상 예시로 시작 <span aria-hidden="true">→</span></button>
     </section>
 
-    <div class="workspace-info"><span class="badge demo" id="mode-badge">데모 · 외부 전송 없음</span><span id="session-note">작성 내용은 현재 세션의 메모리에서만 보관됩니다. 서버를 종료하면 사라집니다.</span></div>
+    <div class="workspace-info"><span class="badge demo" id="mode-badge">데모 · 외부 전송 없음</span><span id="session-note">작성 내용은 이 PC의 앱 메모리에만 보관됩니다. 앱을 닫거나 30분 동안 사용하지 않으면 사라지므로, 이어서 작업하려면 ‘작업 내보내기’로 파일에 저장하세요.</span><button id="export-work" type="button" class="button subtle compact" disabled>작업 내보내기 <span aria-hidden="true">↓</span></button><button id="import-work" type="button" class="button subtle compact" disabled>작업 불러오기</button><input id="work-file" type="file" accept=".json,application/json" hidden aria-label="불러올 작업 파일"></div>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
     <div id="error-notice" class="notice error" role="alert" hidden></div>
     <div id="run-status" class="run-status" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span id="run-status-text">준비 중</span><button id="cancel-run" type="button" class="button compact">실행 취소</button></div>
@@ -89,7 +89,7 @@
   </dialog>
 
   <dialog id="consent-dialog" aria-labelledby="consent-title"><div class="dialog-header"><div><p class="eyebrow">외부 전송 전 확인</p><h2 id="consent-title">전송할 내용을 확인하세요</h2></div><button type="button" class="button close-button" data-close="consent-dialog" aria-label="전송 확인 취소">×</button></div><p id="consent-provider"></p><p class="help">아래 내용은 서버에서 마스킹한 전송 미리보기입니다. 자동 마스킹은 모든 개인정보를 찾지 못할 수 있습니다.</p><ul id="consent-warnings" class="warning-list"></ul><label for="consent-payload">실제 전송할 지침과 자료</label><textarea id="consent-payload" rows="13" readonly></textarea><label class="consent-checkbox"><input id="consent-approved" type="checkbox">이 단계의 전송 내용과 제공사를 확인했으며, 외부 AI 전송 및 발생할 수 있는 사용량·비용에 동의합니다.</label><p class="help">동의는 이 실행에 한 번만 적용됩니다. 새 요청에는 다시 확인합니다.</p><div class="dialog-footer"><button type="button" class="button secondary" data-close="consent-dialog">취소</button><button id="consent-run" type="button" class="button primary" disabled>동의하고 실행</button></div></dialog>
-  <dialog id="reset-dialog" aria-labelledby="reset-title"><div class="dialog-header"><h2 id="reset-title">현재 세션을 비울까요?</h2><button type="button" class="button close-button" data-close="reset-dialog" aria-label="초기화 취소">×</button></div><p>입력·답변 버전·검토·Gemini 키가 모두 사라집니다. 필요한 답변은 먼저 내려받아 보관하세요.</p><div class="dialog-footer"><button type="button" class="button secondary" data-close="reset-dialog">취소</button><button id="reset-session" type="button" class="button danger">현재 세션 비우기</button></div></dialog>
+  <dialog id="reset-dialog" aria-labelledby="reset-title"><div class="dialog-header"><h2 id="reset-title">현재 세션을 비울까요?</h2><button type="button" class="button close-button" data-close="reset-dialog" aria-label="초기화 취소">×</button></div><p>입력·답변 버전·검토·Gemini 키가 모두 사라집니다. 이어서 작업하려면 먼저 ‘작업 내보내기’로 파일에 저장하세요.</p><div class="dialog-footer"><button type="button" class="button secondary" data-close="reset-dialog">취소</button><button id="reset-session" type="button" class="button danger">현재 세션 비우기</button></div></dialog>
   <section id="print-document" aria-label="인쇄할 답변" hidden><p id="print-status"></p><h1 id="print-title"></h1><div id="print-body"></div></section>
 </body>
 </html>

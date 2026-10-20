@@ -4,8 +4,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import * as providerModule from './providers.mjs';
-import { AppError,fail,fields,types,directions,stages,checkKeys,example,demoProvider,newState,validateCase,requireInput,current,caseHash,hash,clone,redact,makePayload,appendVersion,demoGenerate,applyReview,gate,exportState,validateEvidence } from './domain.mjs';
+import { AppError,fail,fields,types,directions,stages,checkKeys,example,demoProvider,newState,validateCase,requireInput,current,caseHash,hash,clone,redact,makePayload,appendVersion,demoGenerate,applyReview,gate,exportState,validateEvidence,importWork } from './domain.mjs';
 
+import { WORK_FILE_MAX_BYTES } from '../public/work-file.js';
+
+export const APP_VERSION='0.5.0';
 const publicRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
 const randomToken=()=>randomBytes(32).toString('hex');
 const sameToken=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
@@ -29,7 +32,7 @@ export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000}={
   }
   function requireIdle(s){if(s.state.running)fail('BUSY','현재 실행을 완료하거나 취소한 뒤 다시 시도해 주세요.',409);}
   function invalidate(s){for(const v of s.state.versions)v.confirmed=false;s.previews.clear();s.state.revision++;}
-  async function body(req){let bytes=0;const chunks=[];for await(const chunk of req){bytes+=chunk.length;if(bytes>512*1024)fail('BODY_TOO_LARGE','요청이 너무 큽니다. 입력 내용을 줄여 주세요.',413);chunks.push(chunk);}try{const result=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');if(!result||typeof result!=='object'||Array.isArray(result))throw new Error();return result;}catch{fail('INVALID_JSON','요청 형식이 올바르지 않습니다.');}}
+  async function body(req,limit=512*1024){let bytes=0;const chunks=[];for await(const chunk of req){bytes+=chunk.length;if(bytes>limit)fail('BODY_TOO_LARGE','요청이 너무 큽니다. 입력 내용을 줄여 주세요.',413);chunks.push(chunk);}try{const result=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');if(!result||typeof result!=='object'||Array.isArray(result))throw new Error();return result;}catch{fail('INVALID_JSON','요청 형식이 올바르지 않습니다.');}}
   function selection(s,stage){if(!stages.includes(stage))fail('INVALID_STAGE','작성 단계를 확인해 주세요.');return s.state.selections[stage];}
   function consentSnapshot(s,stage,options){const payload=makePayload(s.state,stage,options);const provider=selection(s,stage).provider;const clean=redact(payload);return {payload:clean.value,provider,fingerprint:hash({revision:s.state.revision,payload:clean.value,provider}),...clean};}
   function externalAllowed(s,provider){
@@ -50,15 +53,15 @@ export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000}={
       expire();
       const localPageNavigation=req.method==='GET'&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&!url.pathname.startsWith('/api/');
       if(req.headers['sec-fetch-site']==='cross-site'&&!localPageNavigation)fail('CROSS_SITE','다른 사이트의 요청은 허용하지 않습니다.',403);
-      if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:'0.4.1',storage:'memory-only',deployment:'loopback-only'});
+      if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:APP_VERSION,storage:'memory-only',deployment:'loopback-only'});
       if(url.pathname.startsWith('/api/')){
         const s=session(req,res);
         if(req.method==='GET'&&url.pathname==='/api/session'){decorateGemini(s);return json(res,200,{state:exportState(s.state),csrfToken:s.csrf});}
-        if(req.method==='GET'&&url.pathname==='/api/config')return json(res,200,{fields,types,directions,example});
+        if(req.method==='GET'&&url.pathname==='/api/config')return json(res,200,{fields,types,directions,example,version:APP_VERSION});
         if(req.method!=='POST')fail('METHOD_NOT_ALLOWED','허용되지 않은 요청 방식입니다.',405);
         if(!sameToken(req.headers['x-csrf-token'],s.csrf))fail('CSRF_REQUIRED','세션 확인에 실패했습니다. 페이지를 새로 열어 주세요.',403);
         if(!String(req.headers['content-type']||'').startsWith('application/json'))fail('JSON_REQUIRED','JSON 요청만 허용합니다.',415);
-        const data=await body(req);const route=url.pathname;
+        const route=url.pathname;const data=await body(req,route==='/api/import'?WORK_FILE_MAX_BYTES:undefined);
         if(route==='/api/cancel'){s.abort?.abort();return json(res,200,{state:exportState(s.state),message:s.abort?'취소 요청을 보냈습니다.':'실행 중인 작업이 없습니다.'});}
         requireIdle(s);
         if(route==='/api/case'){
@@ -112,8 +115,12 @@ export function createApp({providerApi=providerModule,sessionTtlMs=30*60*1000}={
           const version=current(s.state);if(!version)fail('DRAFT_REQUIRED','초안을 먼저 생성해 주세요.');version.evidence.push(validateEvidence(data));version.review=null;version.confirmed=false;s.previews.clear();s.state.revision++;
         }else if(route==='/api/confirm'){
           const decision=gate(s.state);if(!decision.canConfirm)fail('CONFIRM_BLOCKED',decision.reasons.join(' '),409);current(s.state).confirmed=true;s.previews.clear();s.state.revision++;
+        }else if(route==='/api/import'){
+          // 불러온 작업으로 입력·버전을 통째로 바꾸고, 이 세션의 AI 연결 설정과 Gemini 키는 그대로 둡니다.
+          const work=importWork(data.work);const next=newState();Object.assign(next,{case:work.case,classification:work.classification,versions:work.versions,currentVersionId:work.currentVersionId,selections:s.state.selections,providers:s.state.providers,geminiModels:s.state.geminiModels,revision:s.state.revision+1});s.previews.clear();s.state=next;decorateGemini(s);
         }else if(route==='/api/reset'){
-          s.apiKey=undefined;s.previews.clear();s.state=newState();s.state.providers=[clone(demoProvider),...clone(cachedProviders)];decorateGemini(s);
+          // revision은 세션 안에서 줄어들지 않게 이어 갑니다(화면의 '내보낸 뒤 변경 없음' 판단이 이 값을 씁니다).
+          const revision=s.state.revision+1;s.apiKey=undefined;s.previews.clear();s.state=newState();s.state.revision=revision;s.state.providers=[clone(demoProvider),...clone(cachedProviders)];decorateGemini(s);
         }else fail('NOT_FOUND','요청한 기능을 찾을 수 없습니다.',404);
         return json(res,200,{state:exportState(s.state)});
       }

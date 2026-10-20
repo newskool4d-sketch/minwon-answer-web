@@ -1,3 +1,5 @@
+import { buildWorkFile, hasWork, WORK_FILE_MAX_BYTES, WORK_FORMAT, WORK_MAX_VERSIONS } from './work-file.js';
+
 const $ = (id) => document.getElementById(id);
 const stageNames = { draft: '초안 생성', review: '답변 검토', rewrite: '재작성' };
 const providerNames = { demo: '데모', claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
@@ -18,6 +20,8 @@ let renderedEditVersionId = null;
 let pendingPreview = null;
 let pendingArguments = null;
 let answerFont = 17;
+// Server revision at the last work export or import; any later change counts as work not yet saved to a file.
+let exportedRevision = null;
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -34,7 +38,8 @@ function notice(message, error = false) {
 }
 
 function fail(error) {
-  const message = error?.message || '요청을 완료하지 못했습니다. 입력은 유지됩니다.';
+  let message = error?.message || '요청을 완료하지 못했습니다. 입력은 유지됩니다.';
+  if (error?.code === 'CSRF_REQUIRED' && hasWork(state)) message += ' 오래 사용하지 않아 작업 세션이 만료되었을 수 있습니다. 화면의 작업은 먼저 ‘작업 내보내기’로 저장한 뒤 새로 여세요.';
   notice(error?.code ? `${error.code} · ${message}` : message, true);
 }
 
@@ -79,7 +84,7 @@ function setBusy(label = '') {
   $('run-status-text').textContent = label ? `${label}… 작성 내용과 직전 답변을 유지합니다.` : '';
   $('cancel-run').hidden = !pendingRun;
   $('case-fields').disabled = busy || !appReady;
-  const controls = ['save-case', 'load-example', 'settings-open', 'reset-open', 'save-answer', 'edit-resolved', 'restore-version', 'save-checks', 'confirm-button', 'refresh-providers', 'connect-gemini', 'disconnect-gemini'];
+  const controls = ['save-case', 'load-example', 'settings-open', 'reset-open', 'save-answer', 'edit-resolved', 'restore-version', 'save-checks', 'confirm-button', 'refresh-providers', 'connect-gemini', 'disconnect-gemini', 'export-work', 'import-work'];
   for (const id of controls) $(id).disabled = busy || !appReady;
   $('answer-editor').readOnly = busy || !isCurrent();
   $('rewrite-instructions').disabled = busy;
@@ -496,6 +501,70 @@ function exportText() {
   return { body: plainText($('answer-editor').value), status: final ? `담당자 확정${sourceLabel(version.source).includes('데모') ? ' · 가상 결과' : ''}` : `검토 전 초안${sourceLabel(version?.source).includes('데모') ? ' · 가상 결과' : ''}` };
 }
 
+// 'busy' while an AI run is in progress, 'unsaved' when edits or work have not been exported to a file since the last change.
+function workStatus() {
+  if (!state) return 'clean';
+  if (busy) return 'busy';
+  if (caseDirty || answerDirty || pendingInputs()) return 'unsaved';
+  return hasWork(state) && state.revision !== exportedRevision ? 'unsaved' : 'clean';
+}
+
+// Typed but not yet added evidence, and checklist changes not yet saved, are also lost when the app closes.
+function pendingInputs() {
+  if ([...$('evidence-form').querySelectorAll('input, textarea')].some((input) => input.value.trim())) return true;
+  const version = viewedVersion();
+  return Boolean(version) && [...$('human-checks').querySelectorAll('input')].some((input) => input.checked !== Boolean(version.checks?.[input.name]));
+}
+
+function fileStamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+async function exportWork() {
+  if (busy || !appReady || !state) return;
+  if (caseDirty || answerDirty) {
+    if (!window.confirm('저장하지 않은 수정이 있습니다. 저장한 뒤 작업을 내보낼까요?\n\n[취소]를 누르면 내보내지 않습니다.')) return;
+    let saved = false;
+    await task('저장 후 작업 내보내기', async () => { if (caseDirty) await saveCase(); if (answerDirty) await saveAnswer(); saved = true; });
+    if (!saved && !window.confirm('수정 내용을 저장하지 못했습니다. 마지막으로 저장된 작업만 내보낼까요?')) return;
+  }
+  const work = buildWorkFile(state, { appVersion: config?.version, exportedAt: new Date().toISOString() });
+  const blob = new Blob([JSON.stringify(work)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a'); link.href = url; link.download = `민원답변-작업-${fileStamp()}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1500);
+  // A file that ‘작업 불러오기’ would refuse is not a usable backup, so the work stays marked as unsaved.
+  if (blob.size > WORK_FILE_MAX_BYTES - 1024 || work.versions.length > WORK_MAX_VERSIONS) {
+    fail(Object.assign(new Error(`작업 파일이 불러오기 한도(8MB, 답변 ${WORK_MAX_VERSIONS}개 버전)를 넘어 다시 불러올 수 없습니다. 필요한 답변은 다운로드로 따로 보관하세요.`), { code: 'WORK_FILE_TOO_LARGE' }));
+    return;
+  }
+  exportedRevision = state.revision;
+  notice('작업 파일 내려받기를 시작했습니다. 다운로드 폴더에 저장되었는지 확인하세요. 파일에 민원 내용이 들어 있으니 안전한 곳에 보관하고, ‘작업 불러오기’로 이어서 작업할 수 있습니다.');
+}
+
+async function importWorkFile(file) {
+  if (!file || busy || !appReady) return;
+  if (file.size > WORK_FILE_MAX_BYTES) { fail(Object.assign(new Error('작업 파일이 너무 큽니다(최대 8MB).'), { code: 'WORK_FILE_TOO_LARGE' })); return; }
+  let work = null;
+  try { work = JSON.parse((await file.text()).replace(/^﻿/, '')); } catch { work = null; }
+  if (!work || work.format !== WORK_FORMAT) { fail(Object.assign(new Error('민원답변 도우미에서 내보낸 작업 파일(.json)을 선택해 주세요.'), { code: 'INVALID_WORK_FILE' })); return; }
+  if ((hasWork(state) || caseDirty || answerDirty) && !window.confirm('현재 작업을 불러온 파일의 작업으로 바꿉니다. 현재 화면의 작업은 삭제됩니다.\n\n필요하면 [취소]를 누르고 먼저 ‘작업 내보내기’로 저장하세요. 계속할까요?')) return;
+  await task('작업 불러오기', async () => {
+    // Refresh the session first: after idle expiry the server issues a new session and CSRF token.
+    // If the import then fails, keep the old token so the screen's work is not silently replaced by an empty session.
+    const previousToken = csrfToken;
+    try {
+      await api('/api/session', undefined, { acceptState: false });
+      await api('/api/import', { work });
+    } catch (error) { csrfToken = previousToken; throw error; }
+    viewId = null; answerDirty = false; caseDirty = false; selectedFindings.clear(); renderedReviewId = null;
+    $('rewrite-instructions').value = '';
+    hydrateCase(); render({ syncAnswer: true });
+    exportedRevision = state.revision;
+    notice(`작업 파일을 불러왔습니다(답변 ${state.versions.length}개 버전). 확정 상태는 해제되었습니다. 검토 결과를 확인한 뒤 다시 확정하세요.`);
+  });
+}
+
 function updateConnectionUi() {
   document.body.classList.toggle('is-disconnected', !appReady);
   $('workbench').inert = !appReady;
@@ -609,8 +678,13 @@ function bindEvents() {
   $('font-larger').addEventListener('click', () => { answerFont = Math.min(25, answerFont + 1); document.documentElement.style.setProperty('--answer-size', `${answerFont}px`); });
   $('focus-toggle').addEventListener('click', () => { const enabled = document.body.classList.toggle('focus-mode'); $('focus-toggle').setAttribute('aria-pressed', String(enabled)); $('focus-toggle').textContent = enabled ? '집중 읽기 종료' : '집중 읽기'; });
   $('reset-open').addEventListener('click', () => $('reset-dialog').showModal());
-  $('reset-session').addEventListener('click', () => { $('reset-dialog').close(); task('현재 세션 비우기', async () => { await api('/api/reset', {}); viewId = null; answerDirty = false; caseDirty = false; selectedFindings.clear(); renderedReviewId = null; hydrateCase(); render({ syncAnswer: true }); $('rewrite-instructions').value = ''; $('gemini-key').value = ''; notice('현재 세션을 비웠습니다.'); }); });
+  $('reset-session').addEventListener('click', () => { $('reset-dialog').close(); task('현재 세션 비우기', async () => { await api('/api/reset', {}); exportedRevision = null; viewId = null; answerDirty = false; caseDirty = false; selectedFindings.clear(); renderedReviewId = null; hydrateCase(); render({ syncAnswer: true }); $('rewrite-instructions').value = ''; $('gemini-key').value = ''; notice('현재 세션을 비웠습니다.'); }); });
   window.addEventListener('beforeunload', (event) => { if (caseDirty || answerDirty || busy) { event.preventDefault(); event.returnValue = ''; } });
+  $('export-work').addEventListener('click', () => exportWork());
+  $('import-work').addEventListener('click', () => { if (!busy && appReady) $('work-file').click(); });
+  $('work-file').addEventListener('change', () => { const file = $('work-file').files[0]; $('work-file').value = ''; importWorkFile(file); });
+  // The Windows app window asks this before closing, because closing it ends the local server and its memory-only work.
+  window.minwonAnswerCloseCheck = () => workStatus();
 }
 
 async function init() {
