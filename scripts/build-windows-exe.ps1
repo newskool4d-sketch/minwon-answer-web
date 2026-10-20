@@ -41,6 +41,22 @@ if ($runtimeVersion -ne $expectedRuntimeVersion -or $runtimeHash -ne $expectedRu
 
 $licensePath = Join-Path $root 'licenses\nodejs-v24.14.1-LICENSE.txt'
 if (-not (Test-Path -LiteralPath $licensePath)) { throw "Missing bundled Node.js license: $licensePath" }
+
+# WebView2 SDK from nuget.org (Microsoft-signed); only these three files are shipped next to the installed launcher.
+$webViewVersion = '1.0.4258.31'
+$webViewRoot = Join-Path $root "vendor\webview2\$webViewVersion"
+$webViewFiles = [ordered]@{
+    'Microsoft.Web.WebView2.Core.dll'     = 'D60E6E94245078CB56E44EBD5F360DC04BF18E460136BE93BFC4CFCA43B98505'
+    'Microsoft.Web.WebView2.WinForms.dll' = '6A9E6856F23C463783C3AFB0CA5D78F56324C86657162CCB16D5227B3233B32A'
+    'WebView2Loader.dll'                  = '3426DCC55FDFB8B5E7AC623CF33B4CCF283FBF68A0C5A65BDDFDB4D749A8ABEE'
+}
+foreach ($name in $webViewFiles.Keys) {
+    $file = Join-Path $webViewRoot $name
+    if (-not (Test-Path -LiteralPath $file)) { throw "Missing WebView2 SDK file: $file" }
+    if ((Get-Sha256Hex $file) -ne $webViewFiles[$name]) { throw "WebView2 SDK file does not match the pinned SHA-256: $name" }
+}
+$webViewLicensePath = Join-Path $root "licenses\webview2-sdk-$webViewVersion-LICENSE.txt"
+if (-not (Test-Path -LiteralPath $webViewLicensePath)) { throw "Missing WebView2 SDK license: $webViewLicensePath" }
 $sourcePath = Join-Path $PSScriptRoot 'windows-launcher.cs'
 if (-not (Test-Path -LiteralPath $sourcePath)) { throw "Missing Windows launcher source: $sourcePath" }
 
@@ -52,7 +68,11 @@ $compilerPath = $compilerCandidates | Where-Object { Test-Path -LiteralPath $_ }
 if (-not $compilerPath) { throw 'The built-in .NET Framework C# compiler was not found.' }
 $frameworkDir = Split-Path -Parent $compilerPath
 $compressionAssembly = Join-Path $frameworkDir 'System.IO.Compression.dll'
-if (-not (Test-Path -LiteralPath $compressionAssembly)) { throw 'The built-in System.IO.Compression assembly was not found.' }
+$formsAssembly = Join-Path $frameworkDir 'System.Windows.Forms.dll'
+$drawingAssembly = Join-Path $frameworkDir 'System.Drawing.dll'
+foreach ($assembly in @($compressionAssembly, $formsAssembly, $drawingAssembly)) {
+    if (-not (Test-Path -LiteralPath $assembly)) { throw "The built-in .NET Framework assembly was not found: $assembly" }
+}
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("minwon-answer-build-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
@@ -67,6 +87,8 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'public') -Destination $payloadRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $root 'codex-login.ps1') -Destination $payloadRoot
     Copy-Item -LiteralPath $licensePath -Destination (Join-Path $payloadRoot 'licenses')
+    Copy-Item -LiteralPath $webViewLicensePath -Destination (Join-Path $payloadRoot 'licenses')
+    foreach ($name in $webViewFiles.Keys) { Copy-Item -LiteralPath (Join-Path $webViewRoot $name) -Destination $payloadRoot }
     Copy-Item -LiteralPath $runtimePath -Destination (Join-Path $payloadRoot 'runtime\node.exe')
     [IO.File]::WriteAllText((Join-Path $payloadRoot 'app-version.txt'), "$version`n", [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $payloadRoot 'runtime-version.txt'), "$runtimeVersion`n", [Text.UTF8Encoding]::new($false))
@@ -76,19 +98,32 @@ try {
     [IO.Compression.ZipFile]::CreateFromDirectory($payloadRoot, $zipPath, [IO.Compression.CompressionLevel]::Optimal, $false)
     $versionPath = Join-Path $tempRoot 'MinwonVersion.txt'
     [IO.File]::WriteAllText($versionPath, "$version`n", [Text.UTF8Encoding]::new($false))
+    # Build identity: a rebuilt EXE of the same version installs beside, never runs, an older install.
+    $buildId = (Get-Sha256Hex $zipPath).Substring(0, 12).ToLowerInvariant()
+    $buildPath = Join-Path $tempRoot 'MinwonBuild.txt'
+    [IO.File]::WriteAllText($buildPath, "$buildId`n", [Text.UTF8Encoding]::new($false))
 
     $compilerArguments = @(
-        '/nologo', '/target:exe', '/platform:anycpu', '/optimize+', '/debug-', '/codepage:65001',
+        '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/debug-', '/codepage:65001',
         "/out:$exePath",
         "/reference:$compressionAssembly",
+        "/reference:$formsAssembly",
+        "/reference:$drawingAssembly",
+        "/reference:$(Join-Path $webViewRoot 'Microsoft.Web.WebView2.Core.dll')",
+        "/reference:$(Join-Path $webViewRoot 'Microsoft.Web.WebView2.WinForms.dll')",
         "/resource:$zipPath,MinwonPayload.zip",
         "/resource:$versionPath,MinwonVersion.txt",
+        "/resource:$buildPath,MinwonBuild.txt",
         $sourcePath
     )
     & $compilerPath @compilerArguments
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exePath)) { throw "C# launcher build failed with exit code $LASTEXITCODE." }
 
-    $test = Start-Process -FilePath $exePath -ArgumentList '--self-test' -PassThru -Wait -NoNewWindow
+    # The launcher is a windowed program, so its self-test output is read back from redirected files.
+    $testOutput = Join-Path $tempRoot 'self-test.out.txt'
+    $testError = Join-Path $tempRoot 'self-test.err.txt'
+    $test = Start-Process -FilePath $exePath -ArgumentList '--self-test' -PassThru -Wait -NoNewWindow -RedirectStandardOutput $testOutput -RedirectStandardError $testError
+    foreach ($log in @($testOutput, $testError)) { if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Encoding UTF8 | Write-Output } }
     if ($test.ExitCode -ne 0) { throw "Packaged executable self-test failed with exit code $($test.ExitCode)." }
 
     $sha256 = (Get-Sha256Hex $exePath).ToLowerInvariant()
@@ -96,10 +131,12 @@ try {
     $size = (Get-Item -LiteralPath $exePath).Length
     Write-Output "EXE=$exePath"
     Write-Output "VERSION=$version"
+    Write-Output "BUILD=$buildId"
     Write-Output "SIZE_BYTES=$size"
     Write-Output "SHA256=$sha256"
     Write-Output 'SIGNATURE=NotSigned (no signing certificate configured)'
     Write-Output "RUNTIME=$runtimeVersion ($runtimeHash; $runtimeSignature)"
+    Write-Output "WEBVIEW2_SDK=$webViewVersion (pinned SHA-256 verified)"
     $success = $true
 }
 finally {
