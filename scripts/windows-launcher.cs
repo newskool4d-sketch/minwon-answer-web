@@ -724,7 +724,30 @@ internal static class WebViewProbe
     }
 }
 
-internal sealed class AppWindow : Form
+// WinForms keeps CloseReason.WindowsShutDown after Windows only asked about ending the session (the answer was no, or
+// the restart was cancelled), so every later plain WM_CLOSE (for example from Process.CloseMainWindow) would also look
+// like a shutdown. The windows decide from the message actually being handled instead.
+internal abstract class SessionAwareForm : Form
+{
+    private const int WM_QUERYENDSESSION = 0x0011;
+    private const int WM_ENDSESSION = 0x0016;
+
+    protected bool EndingSession { get; private set; }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg != WM_QUERYENDSESSION && m.Msg != WM_ENDSESSION)
+        {
+            base.WndProc(ref m);
+            return;
+        }
+        EndingSession = true;
+        try { base.WndProc(ref m); }
+        finally { EndingSession = false; }
+    }
+}
+
+internal sealed class AppWindow : SessionAwareForm
 {
     private readonly WebView2 webView;
     private readonly string url;
@@ -735,7 +758,11 @@ internal sealed class AppWindow : Form
     private bool allowClose;
     private bool checkingClose;
     private DateTime closeCheckStarted;
+    // Generation of the latest close and status checks; a check that answers after it was abandoned is ignored.
+    private int closeCheck;
+    private int statusCheck;
     private bool checkingStatus;
+    private DateTime statusCheckStarted;
     private bool serverStopped;
     private bool blockingShutdown;
     // Last answer from the page, polled in the background because Windows asks about shutdown synchronously.
@@ -901,11 +928,21 @@ internal sealed class AppWindow : Form
 
     private async void OnStatusTick(object sender, EventArgs e)
     {
-        if (checkingStatus || allowClose) return;
+        if (allowClose) return;
+        if (checkingStatus)
+        {
+            if (DateTime.UtcNow - statusCheckStarted <= TimeSpan.FromSeconds(5)) return;
+            // A check that has not answered for 5 seconds is abandoned; until a new one answers, a restart is held as if work were unsaved.
+            lastStatus = "unknown";
+            UpdateShutdownBlock();
+        }
+        int check = ++statusCheck;
         checkingStatus = true;
+        statusCheckStarted = DateTime.UtcNow;
         string status;
         try { status = await CloseStatusAsync(); }
         catch (Exception) { status = "unknown"; }
+        if (check != statusCheck) return;
         checkingStatus = false;
         lastStatus = status;
         UpdateShutdownBlock();
@@ -931,7 +968,7 @@ internal sealed class AppWindow : Form
             base.OnFormClosing(e);
             return;
         }
-        if (e.CloseReason == CloseReason.WindowsShutDown)
+        if (EndingSession)
         {
             // Windows needs an immediate answer, so the last polled status decides; Windows then shows the block reason.
             if (lastStatus != "clean") e.Cancel = true;
@@ -947,21 +984,28 @@ internal sealed class AppWindow : Form
             return;
         }
         // A check that has not answered for 5 seconds must never leave the window impossible to close.
-        if (DateTime.UtcNow - closeCheckStarted > TimeSpan.FromSeconds(5) && AskClose("unknown"))
+        if (DateTime.UtcNow - closeCheckStarted > TimeSpan.FromSeconds(5))
         {
-            allowClose = true;
-            e.Cancel = false;
+            closeCheck++;
+            checkingClose = false;
+            if (AskClose("unknown"))
+            {
+                allowClose = true;
+                e.Cancel = false;
+            }
         }
         base.OnFormClosing(e);
     }
 
     private async void ConfirmClose()
     {
+        int check = ++closeCheck;
         checkingClose = true;
         closeCheckStarted = DateTime.UtcNow;
         string status;
         try { status = await CloseStatusAsync(); }
         catch (Exception) { status = "unknown"; }
+        if (check != closeCheck) return;
         checkingClose = false;
         if (status == "clean" || AskClose(status))
         {
@@ -1016,7 +1060,7 @@ internal sealed class AppWindow : Form
 }
 
 // Shown when WebView2 is unavailable: the screen opens in the default browser and this window controls the server.
-internal sealed class BrowserModeWindow : Form
+internal sealed class BrowserModeWindow : SessionAwareForm
 {
     private readonly Process server;
     private readonly RegisteredWaitHandle activation;
@@ -1094,7 +1138,7 @@ internal sealed class BrowserModeWindow : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (!allowClose && e.CloseReason != CloseReason.WindowsShutDown &&
+        if (!allowClose && !EndingSession &&
             MessageBox.Show(this, "종료하면 입력·답변 버전·검토 기록이 모두 삭제됩니다.\n\n이어서 작업하려면 [아니요]를 누른 뒤 브라우저 화면에서 ‘작업 내보내기’로 저장하세요.\n\n종료할까요?", Program.AppTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
         {
             e.Cancel = true;
