@@ -165,11 +165,56 @@ test('Claude 버전은 최소 기능 버전 미만이면 setup, 검증 목록 �
   assert.doesNotMatch(verified.message, /검증 버전과 다름/);
 });
 
-test('로그인 버튼은 공식 사용자 단말 절차만 안내하며 프로세스를 자동 실행하지 않는다', async () => {
+test('Claude 로그인 버튼은 공식 사용자 단말 절차만 안내하며 프로세스를 실행하지 않는다', async () => {
   const { provider, calls } = service();
   assert.match((await provider.startLogin('claude')).message, /claude auth login/);
-  assert.match((await provider.startLogin('codex')).message, /codex-login\.ps1/);
   assert.equal(calls.length, 0);
+});
+
+function loginWindowService({ platform = 'win32', scriptExists = true, spawnFails = false, scriptPath } = {}) {
+  const calls = [];
+  const children = [];
+  const spawnImpl = (binary, args, options) => {
+    const child = new EventEmitter();
+    child.unref = () => {};
+    calls.push({ binary, args, options });
+    children.push(child);
+    queueMicrotask(() => child.emit(spawnFails ? 'error' : 'spawn', spawnFails ? new Error('spawn failed') : undefined));
+    return child;
+  };
+  const codexLoginScript = scriptPath || 'C:\\Users\\tester\\AppData\\Local\\Programs\\minwon-answer\\0.5.0\\codex-login.ps1';
+  const provider = createProviderService({ spawnImpl, exists: async path => scriptExists || path !== codexLoginScript, paths, codexHome, codexLoginScript, platform,
+    environment: { SYSTEMROOT: 'C:\\Windows', LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local', USERPROFILE: 'C:\\Users\\tester', HTTPS_PROXY: 'http://proxy.example:8080' } });
+  return { provider, calls, children, codexLoginScript };
+}
+
+test('Codex 로그인 버튼은 앱 전용 폴더로 공식 로그인 창을 한 번에 하나만 연다', async () => {
+  const { provider, calls, children, codexLoginScript } = loginWindowService();
+  let result = await provider.startLogin('codex');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].binary, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(calls[0].args, ['/d', '/s', '/c', `"start "민원답변 도우미 Codex 로그인" /wait "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "${codexLoginScript}" -CodexHome "${codexHome}" -Pause"`]);
+  assert.equal(calls[0].options.windowsVerbatimArguments, true);assert.equal(calls[0].options.windowsHide, true);assert.equal(calls[0].options.stdio, 'ignore');assert.equal(calls[0].options.detached, undefined);
+  assert.equal(calls[0].options.env.HTTPS_PROXY, 'http://proxy.example:8080');
+  assert.match(result.message, /로그인 창\(PowerShell\)을 열었습니다/);assert.match(result.message, /%LOCALAPPDATA%\\Programs\\minwon-answer\\0\.5\.0\\codex-login\.ps1/);assert.doesNotMatch(result.message, /tester/);
+  result = await provider.startLogin('codex');
+  assert.equal(calls.length, 1);assert.match(result.message, /이미 Codex 로그인 창이 열려 있습니다/);
+  children[0].emit('exit', 0);
+  await provider.startLogin('codex');
+  assert.equal(calls.length, 2);
+});
+
+test('Codex 로그인 창을 열 수 없으면 실행하지 않고 직접 실행 명령을 안내한다', async () => {
+  for (const options of [{ platform: 'linux' }, { scriptExists: false }, { scriptPath: 'C:\\Users\\A&B\\AppData\\Local\\Programs\\minwon-answer\\0.5.0\\codex-login.ps1' }]) {
+    const { provider, calls } = loginWindowService(options);
+    const result = await provider.startLogin('codex');
+    assert.equal(calls.length, 0);assert.match(result.message, /-ExecutionPolicy Bypass -File/);assert.match(result.message, /자동으로 열 수 없습니다/);
+  }
+  const failing = loginWindowService({ spawnFails: true });
+  assert.match((await failing.provider.startLogin('codex')).message, /로그인 창을 열지 못했습니다/);
+  assert.equal(failing.calls.length, 1);
+  await failing.provider.startLogin('codex');
+  assert.equal(failing.calls.length, 2);
 });
 
 test('Claude는 stdin·고정 argv·비영속·빈 도구·정제 환경을 사용하고 임시 영역을 정리한다', async () => {

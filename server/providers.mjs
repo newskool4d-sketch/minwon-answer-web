@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const GOOGLE_ORIGIN = 'https://generativelanguage.googleapis.com';
 const MAX_OUTPUT = 1_048_576;
@@ -279,10 +280,14 @@ export function createProviderService({
   environment = process.env,
   temporaryRoot = tmpdir(),
   codexHome = CODEX_HOME,
+  // Bundled next to server/ in the source tree and in the installed app folder.
+  codexLoginScript = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'codex-login.ps1'),
+  platform = process.platform,
   claudeVersionPolicy = CLAUDE_VERSION_POLICY,
   onCodexDiagnostic = () => {},
 } = {}) {
   const env = safeEnvironment(environment);
+  let codexLoginWindow = null;
 
   function run(binary, args, { signal, timeout = PROBE_TIMEOUT, input = '', captureStderr = false, cwd = temporaryRoot, onStdout, codex = false, npm = false } = {}) {
     const combined = combineSignal(signal, timeout);
@@ -407,9 +412,35 @@ export function createProviderService({
     return [...statuses, { id: 'gemini', name: 'Google Gemini', status: 'setup', message: '세션용 API Key와 실제 모델 목록 확인이 필요합니다. 키를 자동 저장하지 않습니다.', models: [], canLogin: false }];
   }
 
+  // Opens the bundled codex-login.ps1 in a visible PowerShell window on an explicit user click. The app never sees the
+  // token: `codex login` stores it in the app-only CODEX_HOME. One window at a time; the script waits for Enter.
+  async function openCodexLogin() {
+    const shown = homeRelative(codexLoginScript, environment);
+    const manual = `직접 실행하려면 PowerShell에서 powershell -NoProfile -ExecutionPolicy Bypass -File "${shown}" 를 실행해 주세요.`;
+    const scope = '앱 전용 Codex 폴더에서 공식 codex login 을 실행하며 기존 Codex 인증정보는 복사하거나 변경하지 않습니다.';
+    if (platform !== 'win32' || !(await exists(codexLoginScript))) return { message: `로그인 창을 자동으로 열 수 없습니다. ${manual} ${scope}` };
+    if (codexLoginWindow) return { message: '이미 Codex 로그인 창이 열려 있습니다. 그 창에서 공식 ChatGPT 로그인을 마친 뒤 ‘연결 상태 다시 확인’을 눌러 주세요.' };
+    const systemRoot = environment.SYSTEMROOT || environment.SystemRoot || 'C:\\Windows';
+    const powershell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    // The server has no console, and a directly spawned PowerShell with discarded standard streams exits without running
+    // the script. cmd's `start` opens a real console window; `/wait` keeps cmd alive until that window closes.
+    if ([powershell, codexLoginScript, codexHome].some(value => /["%!^&|<>]/.test(value))) return { message: `로그인 창을 자동으로 열 수 없습니다(경로에 특수 문자가 있음). ${manual} ${scope}` };
+    const command = `start "민원답변 도우미 Codex 로그인" /wait "${powershell}" -NoProfile -ExecutionPolicy Bypass -File "${codexLoginScript}" -CodexHome "${codexHome}" -Pause`;
+    // The user's own environment, as if they had opened PowerShell themselves (proxy settings included).
+    const child = spawnImpl(join(systemRoot, 'System32', 'cmd.exe'), ['/d', '/s', '/c', `"${command}"`], {
+      cwd: dirname(codexLoginScript), env: { ...environment }, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true,
+    });
+    const started = await new Promise(resolveStart => { child.once('spawn', () => resolveStart(true)); child.once('error', () => resolveStart(false)); });
+    if (!started) return { message: `로그인 창을 열지 못했습니다. ${manual}` };
+    codexLoginWindow = child;
+    child.once('exit', () => { if (codexLoginWindow === child) codexLoginWindow = null; });
+    child.unref?.();
+    return { message: `Codex 로그인 창(PowerShell)을 열었습니다. 그 창이 여는 공식 ChatGPT 로그인을 마친 뒤 ‘연결 상태 다시 확인’을 눌러 주세요. 로그인을 마칠 때까지 이 앱을 닫지 마세요. ${scope} 창이 보이지 않으면 작업 표시줄을 확인하거나, ${manual}` };
+  }
+
   async function startLogin(providerId) {
     if (providerId === 'claude') return { message: '사용자 터미널에서 claude auth login 을 실행하고 공식 브라우저 로그인 후 연결 상태를 새로 확인해 주세요. 앱은 로그인 토큰을 받지 않습니다.' };
-    if (providerId === 'codex') return { message: '앱 폴더의 codex-login.ps1을 PowerShell에서 실행하고 공식 ChatGPT 로그인을 최초 1회 완료해 주세요. 이 스크립트는 앱 전용 CODEX_HOME에서 codex login 을 실행합니다. 기존 Codex 인증정보는 복사하거나 변경하지 않습니다. 완료 후 연결 상태를 다시 확인해 주세요.' };
+    if (providerId === 'codex') return openCodexLogin();
     if (providerId === 'gemini') return { message: 'Google AI Studio에서 발급한 본인 API Key를 연결 설정에 입력해 주세요.', url: 'https://aistudio.google.com/apikey' };
     throw fail('UNKNOWN_PROVIDER', '지원하지 않는 AI 제공사입니다.', 400);
   }
