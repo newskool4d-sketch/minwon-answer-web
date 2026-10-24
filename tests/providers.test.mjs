@@ -247,8 +247,11 @@ test('취소는 대기 중 CLI를 종료하고 정상 결과로 처리하지 않
   const { provider, calls } = service({ hang: true });
   const controller = new AbortController();
   const result = provider.generate('claude', payload, { signal: controller.signal });
-  const timer = setTimeout(() => controller.abort(), 20);
-  try { await assert.rejects(result, { code: 'GENERATION_ABORTED' }); } finally { clearTimeout(timer); }
+  // Abort only once the generation CLI (-p) has started, so the kill path is always exercised.
+  const deadline = Date.now() + 5000;
+  while (!calls.some(call => call.args.includes('-p')) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+  controller.abort();
+  await assert.rejects(result, { code: 'GENERATION_ABORTED' });
   assert.equal(calls.find(call => call.args.includes('-p')).killed, true);
 });
 
