@@ -6,6 +6,8 @@ GitHub Releases에서 `minwon-answer-<버전>-win-x64.exe`를 내려받아 실�
 
 EXE는 자체 압축 실행 파일입니다. 앱 코드와 Node.js 런타임, 앱 창용 WebView2 구성 파일을 포함하며 별도 Node.js 설치는 필요하지 않습니다. 로컬 서버는 콘솔 창 없이 실행되고, 앱 창을 닫으면 서버가 끝나고 세션 메모리가 지워집니다. 이미 실행 중일 때 다시 실행하면 열려 있는 창을 앞으로 가져옵니다.
 
+v0.5.2부터 첫 번째 아이콘 시안(문서형 말풍선·확인 배지)을 실행 파일에 포함합니다. 앱 창과 시작 메뉴 바로가기도 실행 파일의 아이콘을 사용합니다. 이전 버전 EXE의 아이콘은 바뀌지 않으므로 새 v0.5.2 EXE를 내려받아 실행하세요.
+
 필요 환경: Windows 10·11 x64, .NET Framework 4.6.2 이상(Windows 10·11 기본 포함), Microsoft Edge WebView2 런타임(Windows 11 기본 포함, Windows 10도 대부분 설치됨). WebView2 런타임이 없거나 앱 창을 준비하지 못하면 기본 브라우저로 화면을 열고, 작은 실행 창에서 프로그램을 종료합니다.
 
 ## 작업 보관
@@ -43,6 +45,8 @@ npm run build:win
 ```
 
 빌드는 Windows 기본 .NET Framework C# 컴파일러로 창 프로그램(x64) 런처를 만듭니다. npm 패키지를 새로 설치하지 않습니다. 빌드 스크립트는 로컬 Node.js의 버전과 SHA-256을 공식 Node.js v24.14.1 Windows x64 바이너리의 고정값과 대조한 뒤 번들에 포함합니다. `licenses/nodejs-v24.14.1-LICENSE.txt`를 실행 파일에 함께 넣습니다.
+
+`assets/icons/minwon-answer-icon-01.ico`를 `/win32icon`으로 실행 파일의 네이티브 아이콘 리소스에 포함합니다. 같은 파일을 앱 자료 묶음의 `app.ico`로도 넣어 아이콘 변경이 빌드 식별자에 반영되도록 합니다.
 
 앱 창은 Microsoft의 WebView2 SDK 1.0.4258.31 중 3개 파일만 사용합니다. `vendor/webview2/1.0.4258.31/`의 `Microsoft.Web.WebView2.Core.dll`·`Microsoft.Web.WebView2.WinForms.dll`(net462)과 `WebView2Loader.dll`(win-x64)입니다. 이 파일들은 nuget.org의 `Microsoft.Web.WebView2` 1.0.4258.31 패키지에서 꺼냈습니다. 패키지 SHA-512가 nuget.org 카탈로그 값과 일치했고, 3개 파일 모두 Microsoft Corporation Authenticode 서명이 유효했습니다(2026-10-20 확인). 빌드 스크립트는 3개 파일의 SHA-256 고정값을 대조한 뒤 포함하고, `licenses/webview2-sdk-1.0.4258.31-LICENSE.txt`를 함께 넣습니다.
 

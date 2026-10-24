@@ -10,16 +10,16 @@
 
 각 시안은 1024px PNG, 256px PNG, Windows용 다중 크기 ICO로 제공한다. ICO에는 16·24·32·48·64·128·256px 이미지를 넣었다. 생성된 도안을 바탕으로 크기와 형식만 변환했다. 01·02는 투명 여백, 03은 불투명한 아이보리 배경이다. 생성 프롬프트와 수정 요지는 `generation-prompts.json`에 기록했다.
 
-이번 범위는 아이콘 시안 3개와 한국어 사용안내 파일 제작 및 릴리스 보조 자료 배포이다. 아이콘 시안은 기존 실행 파일과 분리해 보관하며 실행 파일 재빌드·아이콘 삽입·설치는 포함하지 않는다.
+아이콘 시안 3개를 제작한 뒤, 사용자가 선택한 01을 v0.5.2 실행 파일의 아이콘으로 적용했다. 앱 창과 시작 메뉴 바로가기는 실행 파일의 아이콘을 사용한다. 02·03은 대안 시안으로 보관한다.
 
 사용안내 정본: `docs/release/민원답변-도우미-사용안내.html`
 
-릴리스 첨부용 사본: `release-output/minwon-answer-0.5.1-guide-ko.html`
+릴리스 첨부용 사본: `release-output/minwon-answer-0.5.2-guide-ko.html`
 
-아이콘·안내서 묶음: `release-output/minwon-answer-0.5.1-icons-and-guide.zip`
+아이콘·안내서 묶음: `release-output/minwon-answer-0.5.2-icons-and-guide.zip`
 
-공개 위치: [v0.5.1 릴리스](https://github.com/newskool4d-sketch/minwon-answer-web/releases/tag/v0.5.1)
+공개 위치: [v0.5.2 릴리스](https://github.com/newskool4d-sketch/minwon-answer-web/releases/tag/v0.5.2)
 
-안내서는 앱 v0.5.1의 화면·소스와 제공사 공식 문서를 대조했다. 계정 로그인과 실제 AI 호출은 실행하지 않았다. 생성 방식은 기본 제공 `image_gen` 도구이며 API 키를 사용한 CLI 생성은 하지 않았다.
+안내서는 앱 v0.5.2의 화면·소스와 제공사 공식 문서를 대조했다. 계정 로그인과 실제 AI 호출은 실행하지 않았다. 생성 방식은 기본 제공 `image_gen` 도구이며 API 키를 사용한 CLI 생성은 하지 않았다.
 
-검증: ICO 3개의 7개 크기 프레임과 Windows 아이콘 재열기, 안내서 1200px·390px 화면의 이미지·목차·넘침·브라우저 오류 검사를 통과했다. 안내서 정본과 릴리스 사본은 SHA-256이 같다. 기존 EXE의 해시도 기존 `.sha256`과 일치한다.
+검증: ICO 3개의 7개 크기 프레임과 Windows 아이콘 재열기, 안내서 1200px·390px 화면의 이미지·목차·넘침·브라우저 오류 검사를 통과했다. v0.5.2 EXE의 아이콘 7개 이미지가 01 ICO와 바이트 단위로 일치하며 Windows 셸 아이콘을 추출해 확인했다. 자동 테스트 80개와 EXE 내장 self-test도 통과했다. 안내서 정본과 릴리스 사본은 SHA-256이 같다. 기존 v0.5.1 EXE는 보존했다.

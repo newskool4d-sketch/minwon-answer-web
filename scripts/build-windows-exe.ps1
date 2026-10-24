@@ -59,6 +59,8 @@ $webViewLicensePath = Join-Path $root "licenses\webview2-sdk-$webViewVersion-LIC
 if (-not (Test-Path -LiteralPath $webViewLicensePath)) { throw "Missing WebView2 SDK license: $webViewLicensePath" }
 $sourcePath = Join-Path $PSScriptRoot 'windows-launcher.cs'
 if (-not (Test-Path -LiteralPath $sourcePath)) { throw "Missing Windows launcher source: $sourcePath" }
+$iconPath = Join-Path $root 'assets\icons\minwon-answer-icon-01.ico'
+if (-not (Test-Path -LiteralPath $iconPath)) { throw "Missing application icon: $iconPath" }
 
 $compilerCandidates = @(
     (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
@@ -86,6 +88,8 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'server') -Destination $payloadRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $root 'public') -Destination $payloadRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $root 'codex-login.ps1') -Destination $payloadRoot
+    # Include the selected icon in the payload so it also contributes to the build identity.
+    Copy-Item -LiteralPath $iconPath -Destination (Join-Path $payloadRoot 'app.ico')
     Copy-Item -LiteralPath $licensePath -Destination (Join-Path $payloadRoot 'licenses')
     Copy-Item -LiteralPath $webViewLicensePath -Destination (Join-Path $payloadRoot 'licenses')
     foreach ($name in $webViewFiles.Keys) { Copy-Item -LiteralPath (Join-Path $webViewRoot $name) -Destination $payloadRoot }
@@ -106,6 +110,7 @@ try {
     $compilerArguments = @(
         '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/debug-', '/codepage:65001',
         "/out:$exePath",
+        "/win32icon:$iconPath",
         "/reference:$compressionAssembly",
         "/reference:$formsAssembly",
         "/reference:$drawingAssembly",

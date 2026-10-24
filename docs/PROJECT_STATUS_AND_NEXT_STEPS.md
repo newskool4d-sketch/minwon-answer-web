@@ -1,8 +1,8 @@
 # minwon-answer 작업 현황 및 다음 과제
 
-- 정리 기준일: 2026-10-21
+- 정리 기준일: 2026-10-24
 - 저장소: [newskool4d-sketch/minwon-answer-web](https://github.com/newskool4d-sketch/minwon-answer-web) — 공개(2026-10-20 확인). 공개 유지 여부는 3장 6번 과제에서 확정
-- 현재 릴리스: [v0.5.1](https://github.com/newskool4d-sketch/minwon-answer-web/releases/tag/v0.5.1)
+- 현재 릴리스: [v0.5.2](https://github.com/newskool4d-sketch/minwon-answer-web/releases/tag/v0.5.2)
 - 웹 화면(Vercel `minwon-answer-web.vercel.app`): 프로젝트 삭제(2026-10-20). 웹 연결 기능은 v0.4.1에서 제거
 
 ## 1. 완료한 작업
@@ -56,6 +56,15 @@
 | 상태 확인 | 2초 주기 상태 확인이 5초 넘게 답하지 않으면 '확인 불가'로 바꿔 재시작 차단을 유지하고 새 확인 시작. 버린 닫기·상태 확인의 늦은 답은 무시 |
 | 검증 | 자동 테스트 80개·구문 검사 통과, 빌드 시 EXE self-test 통과. 진단 사본 재현: 종료 질의 거절·취소 뒤 닫기 요청(수정 전 무반응, 수정 후 확인창), 상태 확인이 멈춘 뒤 재시작 질의(수정 전 허용, 수정 후 거절). 릴리스 EXE를 설치 없이 실행해 창 표시·서버 버전·닫기 후 서버 종료 확인. GitHub 릴리스에서 내려받은 EXE의 SHA-256이 `.sha256`·자산 digest와 일치 |
 | 배포 파일 | `minwon-answer-0.5.1-win-x64.exe` 34,519,040 bytes, SHA-256 `23a1d4755685010d188b0604eec70fe6cd3e3b9a5389096b31362e83db35f65a`. Authenticode 서명 없음(SmartScreen 경고 가능) |
+
+### v0.5.2 (2026-10-24)
+
+| 구분 | 내용 |
+|---|---|
+| 실행 파일 아이콘 | 첫 번째 시안(문서형 말풍선·확인 배지)을 `/win32icon`으로 EXE에 포함. 앱 창과 시작 메뉴 바로가기는 EXE 아이콘을 사용. 같은 ICO를 자료 묶음의 `app.ico`로 포함해 빌드 식별자에도 반영 |
+| 사용자 안내 | 한국어 실행·AI 연결 안내서를 v0.5.2 기준으로 갱신. HTML 단독 파일, 아이콘 시안 3종·안내서 ZIP 제공 |
+| 검증 | 자동 테스트 80개·구문 검사·EXE 내장 self-test 통과. EXE의 네이티브 아이콘 7개 크기(16·24·32·48·64·128·256px)가 첫 번째 ICO의 이미지 데이터와 바이트 단위로 일치. Windows 셸 아이콘 추출, 별도 폴더에서 실행한 v0.5.2 앱 창의 40px 아이콘 캡처 확인. 기존 설치본 보존 |
+| 배포 파일 | `minwon-answer-0.5.2-win-x64.exe` 34,743,808 bytes, SHA-256 `7f54310e1c598f40ff25795f0c5a469c7d3ecbe3838c517128b8d95c536cd2d3`. Authenticode 서명 없음(SmartScreen 경고 가능) |
 
 ## 2. 현재 동작 방식
 

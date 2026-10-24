@@ -8,7 +8,7 @@ import { AppError,fail,fields,types,directions,stages,checkKeys,example,demoProv
 
 import { WORK_FILE_MAX_BYTES } from '../public/work-file.js';
 
-export const APP_VERSION='0.5.1';
+export const APP_VERSION='0.5.2';
 const publicRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
 const randomToken=()=>randomBytes(32).toString('hex');
 const sameToken=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
