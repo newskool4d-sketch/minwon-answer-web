@@ -20,6 +20,8 @@ GitHub Releases에서 `minwon-answer-<버전>-win-x64.exe`를 내려받아 실�
 - Codex·Claude CLI와 사용자 로그인이 설치 PC에 있어야 합니다. EXE에는 AI 로그인 정보나 API Key를 넣지 않습니다.
 - 앱 창을 닫으면 로컬 서버가 끝나고 작업이 삭제됩니다. 파일로 내보내지 않은 작업이 있으면 닫기 전에 확인합니다.
 - 설치·라이선스·검증 정보는 [Windows 실행 파일 안내](docs/WINDOWS-EXE.md)를 참고하세요.
+- 처음 사용하는 분을 위한 [한국어 실행·AI 연결 안내서(HTML)](https://github.com/newskool4d-sketch/minwon-answer-web/releases/download/v0.5.1/minwon-answer-0.5.1-guide-ko.html)를 제공합니다. 내려받아 더블클릭하면 EXE 실행, Codex·Claude·Gemini 연결, 단계별 모델 설정, 작업 저장과 문제 해결을 확인할 수 있습니다.
+- [아이콘 시안 3종과 안내서 묶음](https://github.com/newskool4d-sketch/minwon-answer-web/releases/download/v0.5.1/minwon-answer-0.5.1-icons-and-guide.zip)은 PNG·Windows용 ICO·생성 프롬프트를 포함합니다. 아이콘은 별도 시안이며 기존 EXE에 삽입되지는 않았습니다.
 
 ### 소스에서 실행
 
